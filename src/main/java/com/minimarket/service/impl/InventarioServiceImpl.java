@@ -1,9 +1,12 @@
 package com.minimarket.service.impl;
 
 import com.minimarket.entity.Inventario;
+import com.minimarket.exception.ResourceNotFoundException;
 import com.minimarket.repository.InventarioRepository;
 import com.minimarket.service.InventarioService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,8 +23,14 @@ public class InventarioServiceImpl implements InventarioService {
     }
 
     @Override
+    public Page<Inventario> findAll(Pageable pageable) {
+        return inventarioRepository.findAll(pageable);
+    }
+
+    @Override
     public Inventario findById(Long id) {
-        return inventarioRepository.findById(id).orElse(null);
+        return inventarioRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Movimiento de inventario no encontrado con ID: " + id));
     }
 
     @Override
@@ -31,6 +40,9 @@ public class InventarioServiceImpl implements InventarioService {
 
     @Override
     public void deleteById(Long id) {
+        if (!inventarioRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Movimiento de inventario no encontrado con ID: " + id);
+        }
         inventarioRepository.deleteById(id);
     }
 

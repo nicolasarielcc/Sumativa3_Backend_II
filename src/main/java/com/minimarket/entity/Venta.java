@@ -1,6 +1,8 @@
 package com.minimarket.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import java.util.Date;
 import java.util.List;
 
@@ -20,36 +22,12 @@ public class Venta {
     @OneToMany(mappedBy = "venta", cascade = CascadeType.ALL)
     private List<DetalleVenta> detalles;
 
-    // Getters y Setters
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public Usuario getUsuario() {
-        return usuario;
-    }
-
-    public void setUsuario(Usuario usuario) {
-        this.usuario = usuario;
-    }
-
-    public Date getFecha() {
-        return fecha;
-    }
-
-    public void setFecha(Date fecha) {
-        this.fecha = fecha;
-    }
-
-    public List<DetalleVenta> getDetalles() {
-        return detalles;
-    }
-
-    public void setDetalles(List<DetalleVenta> detalles) {
-        this.detalles = detalles;
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Usuario getUsuario() { return usuario; }
+    public void setUsuario(Usuario usuario) { this.usuario = usuario; }
+    public Date getFecha() { return fecha; }
+    public void setFecha(Date fecha) { this.fecha = fecha; }
+    public List<DetalleVenta> getDetalles() { return detalles; }
+    public void setDetalles(List<DetalleVenta> detalles) { this.detalles = detalles; }
 }

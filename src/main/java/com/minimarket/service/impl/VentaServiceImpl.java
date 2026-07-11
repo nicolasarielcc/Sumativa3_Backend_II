@@ -1,9 +1,12 @@
 package com.minimarket.service.impl;
 
 import com.minimarket.entity.Venta;
+import com.minimarket.exception.ResourceNotFoundException;
 import com.minimarket.repository.VentaRepository;
 import com.minimarket.service.VentaService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,8 +23,14 @@ public class VentaServiceImpl implements VentaService {
     }
 
     @Override
+    public Page<Venta> findAll(Pageable pageable) {
+        return ventaRepository.findAll(pageable);
+    }
+
+    @Override
     public Venta findById(Long id) {
-        return ventaRepository.findById(id).orElse(null);
+        return ventaRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Venta no encontrada con ID: " + id));
     }
 
     @Override

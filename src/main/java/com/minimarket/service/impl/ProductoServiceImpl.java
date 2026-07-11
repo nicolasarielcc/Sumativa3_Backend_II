@@ -1,11 +1,13 @@
 package com.minimarket.service.impl;
 
-import com.minimarket.entity.Categoria;
 import com.minimarket.entity.Producto;
+import com.minimarket.exception.ResourceNotFoundException;
 import com.minimarket.repository.CategoriaRepository;
 import com.minimarket.repository.ProductoRepository;
 import com.minimarket.service.ProductoService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -25,8 +27,14 @@ public class ProductoServiceImpl implements ProductoService {
     }
 
     @Override
+    public Page<Producto> findAll(Pageable pageable) {
+        return productoRepository.findAll(pageable);
+    }
+
+    @Override
     public Producto findById(Long id) {
-        return productoRepository.findById(id).orElse(null);
+        return productoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con ID: " + id));
     }
 
     @Override
@@ -36,6 +44,9 @@ public class ProductoServiceImpl implements ProductoService {
 
     @Override
     public void deleteById(Long id) {
+        if (!productoRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Producto no encontrado con ID: " + id);
+        }
         productoRepository.deleteById(id);
     }
 
@@ -46,11 +57,8 @@ public class ProductoServiceImpl implements ProductoService {
 
     @Override
     public Producto asignarCategoria(Long productoId, Long categoriaId) {
-        Producto producto = productoRepository.findById(productoId).orElse(null);
-        if (producto == null) return null;
-        Categoria categoria = categoriaRepository.findById(categoriaId).orElse(null);
-        if (categoria == null) return null;
-        producto.setCategoria(categoria);
+        Producto producto = productoRepository.findById(productoId)
+                .orElseThrow(() -> new ResourceNotFoundException("Producto no encontrado con ID: " + productoId));
         return productoRepository.save(producto);
     }
 }
