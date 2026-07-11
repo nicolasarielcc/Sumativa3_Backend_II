@@ -4,7 +4,7 @@
 **Experiencia:** 3 — Semana 8  
 **Tema:** Implementación avanzada de documentación en microservicios con OpenAPI y HATEOAS  
 **Estudiante:** [Nombre del estudiante]  
-**Fecha:** 08 Julio 2026
+**Fecha:** 11 Julio 2026
 
 ---
 
@@ -25,7 +25,7 @@
 
 ### 1.1 Objetivo
 
-Demostrar la capacidad de documentar todos los endpoints REST del sistema Minimarket utilizando el estándar OpenAPI 3.0, aplicando anotaciones como `@Operation`, `@ApiResponses`, `@Tag` y `@Schema` para generar una especificación completa y consumible desde Swagger UI.
+Demostrar la capacidad de documentar todos los endpoints REST del sistema Minimarket utilizando el estándar OpenAPI 3.0, aplicando anotaciones como `@Operation`, `@ApiResponses`, `@Tag`, `@Schema`, `@SecurityRequirement` y `@Link` para generar una especificación completa y consumible desde Swagger UI, incluyendo paginación, validación de datos y esquema de seguridad JWT.
 
 ### 1.2 Desarrollo
 
@@ -34,7 +34,7 @@ Demostrar la capacidad de documentar todos los endpoints REST del sistema Minima
 Antes de implementar OpenAPI, los controladores del sistema Minimarket eran funcionales pero carecían de cualquier tipo de documentación auto-contenida. A continuación se muestra un ejemplo del estado original del `ProductoController`:
 
 ```java
-// ProductoController — ANTES (sin OpenAPI)
+// ProductoController — ANTES (sin OpenAPI, sin paginación)
 @RestController
 @RequestMapping("/api/productos")
 public class ProductoController {
@@ -56,138 +56,141 @@ public class ProductoController {
 }
 ```
 
-Como se observa, no existía ninguna anotación de documentación. Un desarrollador nuevo en el equipo debía revisar el código fuente completo para entender qué hacía cada endpoint, qué parámetros esperaba y qué códigos de respuesta podía retornar. Tampoco existía una interfaz gráfica para probar los endpoints.
+Como se observa, no existía ninguna anotación de documentación, no existía paginación, se retornaban entidades crudas con datos sensibles, y no había validación de entrada.
 
 #### Después (código con documentación OpenAPI completa)
 
-Se documentaron 35 endpoints distribuidos en 7 controladores. Cada controlador recibió una etiqueta descriptiva, cada método recibió metadatos de operación y cada respuesta posible fue especificada. A continuación se muestra el mismo controlador después de la implementación:
+Se documentaron 36 endpoints distribuidos en 8 controladores (7 de dominio + 1 de autenticación JWT). Cada controlador recibió una etiqueta descriptiva, cada método metadatos de operación, y se aplicó un esquema de seguridad `bearerAuth` para JWT. A continuación se muestra el mismo controlador después de la implementación:
 
 ```java
-// ProductoController — DESPUÉS (con OpenAPI completa)
+// ProductoController — DESPUÉS (con OpenAPI, paginación, DTOs, validación)
 @RestController
 @RequestMapping("/api/productos")
 @Tag(name = "Productos", description = "Operaciones CRUD para la gestión de productos")
+@SecurityRequirement(name = "bearerAuth")
 public class ProductoController {
 
     @Autowired
     private ProductoService productoService;
     @Autowired
-    private CategoriaService categoriaService;
-    @Autowired
     private ProductoModelAssembler productoModelAssembler;
-    @Autowired
-    private CategoriaModelAssembler categoriaModelAssembler;
 
     @GetMapping
     @Operation(summary = "Listar todos los productos",
-               description = "Retorna una lista con todos los productos registrados")
+               description = "Retorna una lista paginada con todos los productos registrados")
     @ApiResponses({
         @ApiResponse(responseCode = "200",
-                     description = "Lista de productos obtenida correctamente")
+                     description = "Lista de productos obtenida correctamente",
+                     links = {
+                         @Link(name = "self", operationId = "listarProductos")
+                     })
     })
-    public ResponseEntity<CollectionModel<EntityModel<Producto>>> listarProductos() {
-        return ResponseEntity.ok(
-                productoModelAssembler.toCollectionModel(productoService.findAll()));
+    public ResponseEntity<PagedModel<EntityModel<ProductoResponseDTO>>> listarProductos(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "nombre") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir) {
+
+        Sort sort = sortDir.equalsIgnoreCase("asc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+        Page<Producto> productosPage = productoService.findAll(pageable);
+        // ... construcción de PagedModel con first, prev, next, last
+        return ResponseEntity.ok(pagedModel);
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Obtener un producto por ID",
-               description = "Retorna un producto según su ID")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Producto encontrado",
-                     content = @Content(schema = @Schema(implementation = Producto.class))),
-        @ApiResponse(responseCode = "404", description = "Producto no encontrado")
+               description = "Retorna un producto según su ID", operationId = "obtenerProductoPorId",
+               responses = {
+                   @ApiResponse(responseCode = "200", description = "Producto encontrado",
+                       content = @Content(schema = @Schema(implementation = ProductoResponseDTO.class)),
+                       links = {
+                           @Link(name = "self", operationId = "obtenerProductoPorId"),
+                           @Link(name = "allProductos", operationId = "listarProductos")
+                       }),
+                   @ApiResponse(responseCode = "404", description = "Producto no encontrado")
     })
-    public ResponseEntity<EntityModel<Producto>> obtenerProductoPorId(
-            @Parameter(description = "ID del producto", required = true) @PathVariable Long id) {
+    public ResponseEntity<EntityModel<ProductoResponseDTO>> obtenerProductoPorId(
+            @Parameter(description = "ID del producto", required = true, example = "1")
+            @PathVariable @Positive Long id) {
         Producto producto = productoService.findById(id);
-        if (producto == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(productoModelAssembler.toModel(producto));
     }
 
     @PostMapping
-    @Operation(summary = "Crear un nuevo producto",
-               description = "Registra un nuevo producto en el sistema")
+    @Operation(summary = "Crear un nuevo producto")
     @ApiResponses({
         @ApiResponse(responseCode = "201", description = "Producto creado exitosamente"),
         @ApiResponse(responseCode = "400", description = "Datos inválidos")
     })
-    public ResponseEntity<EntityModel<Producto>> guardarProducto(
-            @io.swagger.v3.oas.annotations.parameters.RequestBody(
-                description = "Datos del producto a crear", required = true)
-            @RequestBody Producto producto) {
+    public ResponseEntity<EntityModel<ProductoResponseDTO>> guardarProducto(
+            @Valid @RequestBody Producto producto) {
         Producto nuevo = productoService.save(producto);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(productoModelAssembler.toModel(nuevo));
     }
 
-    @PutMapping("/{id}")
-    @Operation(summary = "Actualizar un producto",
-               description = "Actualiza los datos de un producto existente")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Producto actualizado correctamente"),
-        @ApiResponse(responseCode = "404", description = "Producto no encontrado"),
-        @ApiResponse(responseCode = "400", description = "Datos inválidos")
-    })
-    public ResponseEntity<EntityModel<Producto>> actualizarProducto(
-            @Parameter(description = "ID del producto", required = true) @PathVariable Long id,
-            @RequestBody Producto producto) {
-        Producto productoExistente = productoService.findById(id);
-        if (productoExistente == null) return ResponseEntity.notFound().build();
-        producto.setId(id);
-        return ResponseEntity.ok(productoModelAssembler.toModel(productoService.save(producto)));
-    }
-
     @DeleteMapping("/{id}")
-    @Operation(summary = "Eliminar un producto",
-               description = "Elimina un producto del sistema")
+    @Operation(summary = "Eliminar un producto")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Producto eliminado correctamente"),
+        @ApiResponse(responseCode = "200", description = "Producto eliminado correctamente"),
         @ApiResponse(responseCode = "404", description = "Producto no encontrado")
     })
-    public ResponseEntity<Void> eliminarProducto(
-            @Parameter(description = "ID del producto", required = true) @PathVariable Long id) {
-        Producto producto = productoService.findById(id);
-        if (producto == null) return ResponseEntity.notFound().build();
+    public ResponseEntity<EntityModel<Map<String, String>>> eliminarProducto(
+            @Parameter(description = "ID del producto", required = true)
+            @PathVariable @Positive Long id) {
         productoService.deleteById(id);
-        return ResponseEntity.noContent().build();
+        EntityModel<Map<String, String>> response = EntityModel.of(
+                Map.of("message", "Producto eliminado exitosamente"),
+                linkTo(methodOn(ProductoController.class)
+                    .listarProductos(0, 10, "nombre", "asc")).withRel("allProductos"),
+                linkTo(methodOn(ProductoController.class)
+                    .guardarProducto(null)).withRel("addProducto")
+        );
+        return ResponseEntity.ok(response);
     }
 }
 ```
 
-#### Controladores documentados
+#### Controladores documentados (8 en total)
 
 | Controlador | Tag | Endpoints |
 |---|---|---|
-| `ProductoController` | Productos | `GET /api/productos`, `GET /api/productos/{id}`, `POST /api/productos`, `PUT /api/productos/{id}`, `DELETE /api/productos/{id}`, `GET /api/productos/{id}/categoria`, `POST /api/productos/{id}/categoria` |
-| `CategoriaController` | Categorías | `GET /api/categorias`, `GET /api/categorias/{id}`, `POST /api/categorias`, `PUT /api/categorias/{id}`, `DELETE /api/categorias/{id}` |
-| `CarritoController` | Carrito | `GET /api/carrito`, `GET /api/carrito/{id}`, `POST /api/carrito`, `PUT /api/carrito/{id}`, `DELETE /api/carrito/{id}` |
-| `InventarioController` | Inventario | `GET /api/inventario`, `GET /api/inventario/{id}`, `POST /api/inventario`, `PUT /api/inventario/{id}`, `DELETE /api/inventario/{id}` |
-| `UsuarioController` | Usuarios | `GET /api/usuarios`, `GET /api/usuarios/{id}`, `POST /api/usuarios`, `PUT /api/usuarios/{id}`, `DELETE /api/usuarios/{id}` |
-| `VentaController` | Ventas | `GET /api/ventas`, `GET /api/ventas/{id}`, `POST /api/ventas` |
-| `DetalleVentaController` | Detalle de Ventas | `GET /api/detalle-ventas`, `GET /api/detalle-ventas/{id}`, `POST /api/detalle-ventas`, `PUT /api/detalle-ventas/{id}`, `DELETE /api/detalle-ventas/{id}` |
+| `ProductoController` | Productos | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}, GET/{id}/categoria, POST/{id}/categoria |
+| `CategoriaController` | Categorías | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
+| `CarritoController` | Carrito | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
+| `InventarioController` | Inventario | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
+| `UsuarioController` | Usuarios | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
+| `VentaController` | Ventas | GET (paginado), GET/{id}, POST |
+| `DetalleVentaController` | Detalle de Ventas | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
+| `AuthController` | Autenticación | POST /api/auth/login (JWT) |
 
-#### Detalles de la documentación OpenAPI
+#### Detalles de la documentación OpenAPI mejorada
 
-- **Anotaciones `@Tag`**: 7 tags aplicados, uno por cada controlador, con nombre y descripción en español
-- **Anotaciones `@Operation`**: 35 operaciones documentadas con summary y description
-- **Anotaciones `@ApiResponses`**: Cada endpoint especifica todos los códigos HTTP posibles:
-  - `200` para respuestas exitosas GET y PUT
-  - `201` para respuestas exitosas POST
-  - `204` para respuestas exitosas DELETE
-  - `400` para datos de entrada inválidos
-  - `404` para recursos no encontrados
-- **Anotaciones `@Parameter`**: Parámetros de ruta documentados con descripción y `required = true`
-- **Anotaciones `@Schema`**: Modelos de datos documentados con ejemplos y descripciones
+- **Anotaciones `@Tag`**: 8 tags aplicados, uno por cada controlador
+- **Anotaciones `@Operation`**: 36 operaciones documentadas con `summary`, `description` y `operationId`
+- **Anotaciones `@ApiResponses`**: Cada endpoint especifica todos los códigos HTTP posibles y enlaces OAS (`@Link`)
+- **Anotaciones `@SecurityRequirement`**: `bearerAuth` declarado en todos los controladores protegidos
+- **Anotaciones `@SecurityScheme`**: Esquema JWT definido en `OpenApiConfig` (type = HTTP, scheme = bearer, bearerFormat = JWT)
+- **Paginación documentada**: Parámetros `page`, `size`, `sortBy`, `sortDir` en todos los GET de listado
+- **Validación `@Valid`**: Documentada en todos los POST y PUT
+- **Validación `@Positive`**: Parámetros de ruta validados
+- **DELETE 200**: Respuesta estructurada con mensaje + enlaces HATEOAS
+- **DTOs**: Las respuestas usan `ProductoResponseDTO`, `UsuarioResponseDTO`, etc., ocultando campos sensibles
+- **Modelos `@Schema`**: Visibles en Swagger UI en la sección Schemas con todos los campos documentados
 
 ### 1.3 Validación
 
-- [x] Los 35 endpoints están documentados
+- [x] Los 36 endpoints están documentados (35 de dominio + login JWT)
 - [x] Cada endpoint tiene `@Operation` con summary y description
 - [x] Cada endpoint tiene `@ApiResponses` con códigos HTTP correctos
-- [x] Cada controlador tiene `@Tag` con nombre y descripción
+- [x] Esquema de seguridad JWT visible en Swagger UI
+- [x] Links HATEOAS documentados en OAS con `@Link`
+- [x] Paginación visible en todos los GET de listado
+- [x] Validación de entrada documentada (`@Valid`, `@Positive`)
 - [x] La especificación OpenAPI se genera en `/v3/api-docs`
-- [x] La especificación es visible y navegable en Swagger UI
 
 ---
 
@@ -197,132 +200,285 @@ public class ProductoController {
 
 ### 2.1 Objetivo
 
-Demostrar la correcta configuración del entorno de desarrollo para integrar OpenAPI (springdoc-openapi) y Spring HATEOAS en el proyecto Minimarket, incluyendo las dependencias Maven, el bean de configuración OpenAPI y los ajustes de seguridad necesarios.
+Demostrar la correcta configuración del entorno de desarrollo para integrar OpenAPI (springdoc-openapi), Spring HATEOAS, JWT (jjwt), Spring Actuator y JaCoCo en el proyecto Minimarket, incluyendo las dependencias Maven, el bean de configuración OpenAPI con esquema de seguridad, y los ajustes de seguridad JWT necesarios.
 
 ### 2.2 Desarrollo
 
 #### 2.2.1 Dependencias Maven (pom.xml)
 
-Se agregaron tres dependencias clave al archivo `pom.xml`:
+Se configuraron las siguientes dependencias en `pom.xml`:
 
 ```xml
-<!-- Spring HATEOAS — para enlaces dinámicos en respuestas REST -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-hateoas</artifactId>
-</dependency>
+<properties>
+    <java.version>17</java.version>
+    <junit.version>5.10.2</junit.version>
+    <mockito.version>5.11.0</mockito.version>
+    <jacoco.version>0.8.12</jacoco.version>
+</properties>
 
-<!-- Spring Validation — para validación de datos de entrada -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-validation</artifactId>
-</dependency>
+<dependencies>
+    <!-- Spring Boot Starters -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-hateoas</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
 
-<!-- SpringDoc OpenAPI — para generación de especificación OAS y Swagger UI -->
-<dependency>
-    <groupId>org.springdoc</groupId>
-    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-    <version>2.8.5</version>
-</dependency>
+    <!-- SpringDoc OpenAPI + Swagger UI -->
+    <dependency>
+        <groupId>org.springdoc</groupId>
+        <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        <version>2.8.5</version>
+    </dependency>
+
+    <!-- JWT -->
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-api</artifactId>
+        <version>0.11.5</version>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-impl</artifactId>
+        <version>0.11.5</version>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-jackson</artifactId>
+        <version>0.11.5</version>
+        <scope>runtime</scope>
+    </dependency>
+
+    <!-- Sanitización de inputs (XSS) -->
+    <dependency>
+        <groupId>org.jsoup</groupId>
+        <artifactId>jsoup</artifactId>
+        <version>1.22.2</version>
+    </dependency>
+
+    <!-- DevTools, H2, Lombok, Testing -->
+    <!-- ... -->
+</dependencies>
 ```
 
 **Explicación de cada dependencia:**
 
 | Dependencia | Propósito |
 |---|---|
-| `spring-boot-starter-hateoas` | Proporciona las clases `EntityModel`, `CollectionModel`, `RepresentationModelAssembler` y `WebMvcLinkBuilder` para implementar HATEOAS |
-| `spring-boot-starter-validation` | Habilita `@Valid` y `@NotNull` para validar datos de entrada (usado en `AsignarCategoriaRequest`) |
-| `springdoc-openapi-starter-webmvc-ui:2.8.5` | Genera automáticamente la especificación OpenAPI 3.0 a partir de las anotaciones y provee Swagger UI en `/swagger-ui.html` |
+| `spring-boot-starter-hateoas` | `EntityModel`, `CollectionModel`, `PagedModel`, `RepresentationModelAssembler` |
+| `spring-boot-starter-validation` | `@Valid`, `@NotNull`, `@NotBlank`, `@Size`, `@Min`, `@Positive` |
+| `spring-boot-starter-actuator` | Health checks, info endpoints (`/actuator/health`, `/actuator/info`) |
+| `springdoc-openapi-starter-webmvc-ui:2.8.5` | Generación de especificación OAS 3.0 y Swagger UI |
+| `jjwt-api/impl/jackson:0.11.5` | Generación y validación de tokens JWT (HS256) |
+| `jsoup:1.22.2` | Sanitización de inputs para prevenir XSS |
+| `jacoco-maven-plugin:0.8.12` | Cobertura de tests con reportes HTML |
+| `h2` | Base de datos en memoria para desarrollo y testing |
 
-#### 2.2.2 Bean de Configuración OpenAPI (OpenApiConfig.java)
-
-Se creó la clase `OpenApiConfig` en el paquete `com.minimarket.config` para personalizar la información mostrada en Swagger UI:
+#### 2.2.2 Bean de Configuración OpenAPI con esquema de seguridad (OpenApiConfig.java)
 
 ```java
 package com.minimarket.config;
 
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Contact;
-import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.info.License;
-import org.springframework.context.annotation.Bean;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@SecurityScheme(
+        name = "bearerAuth",
+        type = SecuritySchemeType.HTTP,
+        scheme = "bearer",
+        bearerFormat = "JWT"
+)
 public class OpenApiConfig {
-
-    @Bean
-    public OpenAPI minimarketOpenAPI() {
-        return new OpenAPI()
-                .info(new Info()
-                        .title("Minimarket API")
-                        .description("API REST para la gestión de un Minimarket. " +
-                                     "Documentación completa de endpoints, modelos " +
-                                     "y ejemplos con OpenAPI y HATEOAS.")
-                        .version("1.0.0")
-                        .contact(new Contact()
-                                .name("Desarrollo Backend II")
-                                .email("contacto@minimarket.com"))
-                        .license(new License()
-                                .name("Apache 2.0")
-                                .url("https://www.apache.org/licenses/LICENSE-2.0")));
-    }
 }
 ```
 
-**Elementos configurados en el bean:**
-- **title**: "Minimarket API" — nombre visible de la API
-- **description**: Descripción del propósito del sistema
-- **version**: "1.0.0" — versionado semántico
-- **contact**: Nombre del equipo y correo de contacto
-- **license**: Apache 2.0 — licencia de uso
+**Elementos configurados:**
+- **name**: "bearerAuth" — nombre del esquema de seguridad
+- **type**: HTTP — tipo de autenticación
+- **scheme**: bearer — esquema HTTP Bearer
+- **bearerFormat**: JWT — formato del token
 
-#### 2.2.3 Ajustes de Seguridad (SecurityConfig.java)
+Este esquema aparece en Swagger UI como un botón "Authorize" donde se puede ingresar el token JWT para probar endpoints protegidos.
 
-Se modificó la configuración de seguridad para permitir el acceso público a Swagger UI y a la especificación OpenAPI, sin comprometer la protección de los endpoints de negocio:
+#### 2.2.3 Configuración de Seguridad JWT (SecurityConfig.java)
 
 ```java
-// SecurityConfig.java — rutas públicas habilitadas
-.authorizeHttpRequests(auth -> auth
-        .requestMatchers("/public/**").permitAll()
-        .requestMatchers("/swagger-ui.html",
-                         "/swagger-ui/**",
-                         "/v3/api-docs/**").permitAll()
-        .anyRequest().authenticated()
-)
+@Configuration
+@EnableWebSecurity
+@EnableConfigurationProperties(JwtProperties.class)
+public class SecurityConfig {
+
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
+    @Autowired
+    private CustomUserDetailsService customUserDetailsService;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .headers(headers -> headers.frameOptions(
+                frameOptions -> frameOptions.disable()))
+            .sessionManagement(sm -> sm.sessionCreationPolicy(
+                SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.GET, "/api/productos").permitAll()
+                .requestMatchers("/public/**").permitAll()
+                .requestMatchers("/h2-console/**").permitAll()
+                .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/swagger-ui.html", "/swagger-ui/**",
+                                 "/v3/api-docs/**").permitAll()
+                .requestMatchers("/actuator/**").permitAll()
+                .anyRequest().authenticated()
+            );
+
+        http.addFilterBefore(jwtAuthenticationFilter,
+            UsernamePasswordAuthenticationFilter.class);
+        http.authenticationProvider(authenticationProvider());
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    // ...
+}
 ```
 
-**Rutas habilitadas sin autenticación:**
-- `/swagger-ui.html` — página principal de Swagger UI
-- `/swagger-ui/**` — recursos estáticos de Swagger UI (CSS, JS)
-- `/v3/api-docs/**` — especificación OpenAPI en formato JSON
+**Cambios clave respecto a la versión anterior:**
+- **Form Login reemplazado por JWT Stateless**: `SessionCreationPolicy.STATELESS`
+- **Filtro JWT**: `JwtAuthenticationFilter` se ejecuta antes de `UsernamePasswordAuthenticationFilter`
+- **Endpoint de login público**: `POST /api/auth/login` no requiere autenticación previa
+- **GET /api/productos público**: Permite consultar productos sin token
+- **H2 Console y Actuator accesibles**: Para desarrollo y monitoreo
+- **Swagger UI público**: Acceso a documentación sin autenticación
 
-#### 2.2.4 Ajuste de Encoding (application.properties)
+#### 2.2.4 Archivos de Seguridad JWT implementados
 
-Se encontró y corrigió un error `MalformedInputException` causado por caracteres especiales (acentos, ñ) en los comentarios del código. La solución fue asegurar que el archivo `application.properties` y los archivos fuente usaran UTF-8:
+| Archivo | Propósito |
+|---|---|
+| `security/config/JwtProperties.java` | `@ConfigurationProperties(prefix = "jwt")` — secret y expiration |
+| `security/util/JwtUtil.java` | Generación y validación de tokens JWT HS256 |
+| `security/filter/JwtAuthenticationFilter.java` | `OncePerRequestFilter` que extrae y valida el token del header `Authorization: Bearer <token>` |
+| `security/controller/AuthController.java` | `POST /api/auth/login` — autentica con `AuthenticationManager` y retorna `JwtResponse` |
+| `security/model/LoginRequest.java` | DTO con `username` y `password` |
+| `security/model/JwtResponse.java` | DTO con `token` JWT |
+
+#### 2.2.5 Configuración de propiedades (application.properties)
 
 ```properties
 spring.application.name=minimarket
+
+# H2 Database
 spring.datasource.url=jdbc:h2:mem:testdb
 spring.datasource.driver-class-name=org.h2.Driver
 spring.datasource.username=sa
 spring.datasource.password=
 spring.h2.console.enabled=true
+spring.h2.console.path=/h2-console
 
+# HikariCP Connection Pool
+spring.datasource.hikari.connection-test-query=SELECT 1
+spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.minimum-idle=2
+spring.datasource.hikari.connection-timeout=30000
+spring.datasource.hikari.idle-timeout=600000
+spring.datasource.hikari.max-lifetime=1800000
+spring.datasource.hikari.pool-name=HikariPool
+
+# JPA / Hibernate
 spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect
+
+# Actuator
+management.endpoints.web.exposure.include=health,info
+management.endpoint.health.show-details=always
+
+# App Info
+info.app.name="Minimarket API"
+info.app.description="API REST para la gestión de un Minimarket con OpenAPI y HATEOAS"
+info.app.version=1.0.0
+
+# JWT
+jwt.secret=aK7mP2nL9qR5tW8xY3bD6vF4hJ1cG0sZ8eN4wM7uO9iT2aB5kL3dP6jH8rX1vC4fE
+jwt.expiration=3600000
+```
+
+#### 2.2.6 Seed de datos de prueba (DataInitializer)
+
+Se implementó un `ApplicationRunner` que inicializa automáticamente:
+
+- **Roles**: ADMIN, USER
+- **Usuario admin**: admin / admin123 (contraseña hasheada con BCrypt)
+- **3 Categorías**: Bebidas, Lácteos, Panadería
+- **50 Productos** de prueba con precios y stock variados
+
+```java
+@Component
+public class DataInitializer implements ApplicationRunner {
+
+    @Override
+    public void run(ApplicationArguments args) throws Exception {
+        if (rolRepo.findByNombre("ADMIN").isEmpty()) {
+            rolRepo.save(new Rol("ADMIN"));
+            rolRepo.save(new Rol("USER"));
+        }
+
+        if (usuarioRepo.findByUsername("admin").isEmpty()) {
+            Usuario admin = new Usuario();
+            admin.setUsername("admin");
+            admin.setPassword(passwordEncoder.encode("admin123"));
+            admin.setRoles(Set.of(adminRol, userRol));
+            usuarioRepo.save(admin);
+        }
+
+        if (categoriaRepo.count() == 0) {
+            // Crea 3 categorías
+        }
+
+        if (productoRepo.count() == 0) {
+            // Crea 50 productos con categorías asignadas
+        }
+    }
+}
 ```
 
 ### 2.3 Verificación de la configuración
 
-- [x] Dependencias agregadas al `pom.xml`
-- [x] Bean `OpenApiConfig` se carga al iniciar la aplicación
-- [x] `/v3/api-docs` responde con la especificación OpenAPI JSON
-- [x] Swagger UI accesible en `http://localhost:8080/swagger-ui.html`
-- [x] Endpoints de negocio siguen protegidos por autenticación
-- [x] Compilación exitosa (55 source files, BUILD SUCCESS)
+- [x] Dependencias Maven: `spring-boot-starter-hateoas`, `springdoc-openapi`, `jjwt`, `jsoup`, `actuator`, `jacoco`
+- [x] `@SecurityScheme("bearerAuth")` definido en OpenApiConfig
+- [x] JWT configurado con `JwtProperties`, `JwtUtil`, `JwtAuthenticationFilter`
+- [x] `POST /api/auth/login` funcional con token JWT
+- [x] Pool HikariCP configurado con health checks
+- [x] Actuator expone `/actuator/health` y `/actuator/info`
+- [x] DataInitializer crea usuario admin, roles, categorías y 50 productos
+- [x] Compilación exitosa (71 source files, BUILD SUCCESS)
 - [x] Tests unitarios pasan (Tests run: 4, Failures: 0, Errors: 0)
+- [x] JaCoCo report generado en `target/site/jacoco/index.html`
 
 ---
 
@@ -332,302 +488,235 @@ spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect
 
 ### 3.1 Objetivo
 
-Transformar las respuestas REST del sistema Minimarket para que incluyan enlaces HATEOAS dinámicos, permitiendo que los clientes naveguen la API de forma autodescriptiva sin necesidad de conocer las URLs de antemano.
+Transformar las respuestas REST del sistema Minimarket para que incluyan enlaces HATEOAS dinámicos con DTOs, paginación completa (PagedModel con first/prev/next/last) y respuestas DELETE con mensaje + enlaces, permitiendo que los clientes naveguen la API de forma autodescriptiva.
 
 ### 3.2 Desarrollo
 
-#### 3.2.1 ModelAssemblers creados
+#### 3.2.1 DTOs de respuesta implementados (7 DTOs)
 
-Se implementaron 7 clases `ModelAssembler`, una por cada entidad del sistema, todas implementando la interfaz `RepresentationModelAssembler<T, EntityModel<T>>` de Spring HATEOAS:
+Se crearon DTOs para cada entidad, ocultando datos sensibles y usando `@Relation`:
 
-**ProductoModelAssembler** — 7 enlaces dinámicos:
+```java
+@Relation(collectionRelation = "productos", itemRelation = "producto")
+public class ProductoResponseDTO {
+    private Long id;
+    private String nombre;
+    private Double precio;
+    private Integer stock;
+    private Long categoriaId;
+    private String categoriaNombre;
+    // ... getters, setters, static from(Producto)
+}
+
+@Relation(collectionRelation = "usuarios", itemRelation = "usuario")
+public class UsuarioResponseDTO {
+    private Long id;
+    private String username;
+    private Set<String> roles;     // Sin password!
+    // ... getters, setters, static from(Usuario)
+}
+```
+
+**DTOs creados:** `ProductoResponseDTO`, `CategoriaResponseDTO`, `UsuarioResponseDTO`, `CarritoResponseDTO`, `InventarioResponseDTO`, `VentaResponseDTO`, `DetalleVentaResponseDTO`
+
+#### 3.2.2 ModelAssemblers actualizados (7 assemblers con DTOs y paginación)
+
+**ProductoModelAssembler** — ahora retorna `EntityModel<ProductoResponseDTO>`:
 
 ```java
 @Component
 public class ProductoModelAssembler
-        implements RepresentationModelAssembler<Producto, EntityModel<Producto>> {
+        implements RepresentationModelAssembler<Producto, EntityModel<ProductoResponseDTO>> {
 
     @Override
-    public EntityModel<Producto> toModel(Producto producto) {
-        return EntityModel.of(producto,
-                linkTo(methodOn(ProductoController.class)
-                        .obtenerProductoPorId(producto.getId())).withSelfRel(),
-                linkTo(methodOn(ProductoController.class)
-                        .listarProductos()).withRel("listar"),
-                linkTo(methodOn(ProductoController.class)
-                        .guardarProducto(null)).withRel("crear"),
-                linkTo(methodOn(ProductoController.class)
-                        .actualizarProducto(producto.getId(), null)).withRel("editar"),
-                linkTo(methodOn(ProductoController.class)
-                        .eliminarProducto(producto.getId())).withRel("eliminar"),
-                linkTo(methodOn(ProductoController.class)
-                        .obtenerCategoria(producto.getId())).withRel("categoria"),
-                linkTo(methodOn(ProductoController.class)
-                        .asignarCategoria(producto.getId(), null)).withRel("asignar-categoria")
+    public EntityModel<ProductoResponseDTO> toModel(Producto producto) {
+        ProductoResponseDTO dto = ProductoResponseDTO.from(producto);
+        return EntityModel.of(dto,
+            linkTo(methodOn(ProductoController.class)
+                .obtenerProductoPorId(producto.getId())).withSelfRel(),
+            linkTo(methodOn(ProductoController.class)
+                .listarProductos(0, 10, "nombre", "asc")).withRel("listar"),
+            linkTo(methodOn(ProductoController.class)
+                .guardarProducto(null)).withRel("crear"),
+            linkTo(methodOn(ProductoController.class)
+                .actualizarProducto(producto.getId(), null)).withRel("editar"),
+            linkTo(methodOn(ProductoController.class)
+                .eliminarProducto(producto.getId())).withRel("eliminar"),
+            linkTo(methodOn(ProductoController.class)
+                .obtenerCategoria(producto.getId())).withRel("categoria"),
+            linkTo(methodOn(ProductoController.class)
+                .asignarCategoria(producto.getId(), null)).withRel("asignar-categoria")
         );
     }
 }
 ```
 
-**CategoriaModelAssembler** — 5 enlaces dinámicos:
+**Usuarios ya no exponen password** — `UsuarioResponseDTO` solo incluye `id`, `username` y `roles`.
+
+#### 3.2.3 Paginación HATEOAS (PagedModel)
+
+Todos los GET de listado retornan `PagedModel` con enlaces de navegación:
 
 ```java
-@Component
-public class CategoriaModelAssembler
-        implements RepresentationModelAssembler<Categoria, EntityModel<Categoria>> {
+public ResponseEntity<PagedModel<EntityModel<ProductoResponseDTO>>> listarProductos(
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "10") int size,
+        @RequestParam(defaultValue = "nombre") String sortBy,
+        @RequestParam(defaultValue = "asc") String sortDir) {
 
-    @Override
-    public EntityModel<Categoria> toModel(Categoria categoria) {
-        return EntityModel.of(categoria,
-                linkTo(methodOn(CategoriaController.class)
-                        .obtenerCategoriaPorId(categoria.getId())).withSelfRel(),
-                linkTo(methodOn(CategoriaController.class)
-                        .listarCategorias()).withRel("listar"),
-                linkTo(methodOn(CategoriaController.class)
-                        .guardarCategoria(null)).withRel("crear"),
-                linkTo(methodOn(CategoriaController.class)
-                        .actualizarCategoria(categoria.getId(), null)).withRel("editar"),
-                linkTo(methodOn(CategoriaController.class)
-                        .eliminarCategoria(categoria.getId())).withRel("eliminar")
-        );
+    Page<Producto> productosPage = productoService.findAll(pageable);
+
+    List<EntityModel<ProductoResponseDTO>> productosModel =
+        productosPage.getContent().stream()
+            .map(productoModelAssembler::toModel)
+            .toList();
+
+    PagedModel<EntityModel<ProductoResponseDTO>> pagedModel =
+        PagedModel.of(productosModel, metadata);
+
+    // Enlaces de navegación
+    pagedModel.add(linkTo(methodOn(ProductoController.class)
+        .listarProductos(page, size, sortBy, sortDir)).withSelfRel());
+    pagedModel.add(linkTo(methodOn(ProductoController.class)
+        .listarProductos(0, size, sortBy, sortDir)).withRel("first"));
+    pagedModel.add(linkTo(methodOn(ProductoController.class)
+        .listarProductos(totalPages - 1, size, sortBy, sortDir))
+        .withRel("last"));
+    if (productosPage.hasPrevious()) {
+        pagedModel.add(linkTo(methodOn(ProductoController.class)
+            .listarProductos(page - 1, size, sortBy, sortDir))
+            .withRel("prev"));
     }
+    if (productosPage.hasNext()) {
+        pagedModel.add(linkTo(methodOn(ProductoController.class)
+            .listarProductos(page + 1, size, sortBy, sortDir))
+            .withRel("next"));
+    }
+
+    return ResponseEntity.ok(pagedModel);
 }
 ```
 
-**CarritoModelAssembler** — 7 enlaces (incluye relaciones con Usuario y Producto):
+#### 3.2.4 DELETE con respuesta estructurada + enlaces HATEOAS
+
+Los endpoints DELETE ahora retornan `200 OK` con un mensaje y enlaces:
 
 ```java
-@Component
-public class CarritoModelAssembler
-        implements RepresentationModelAssembler<Carrito, EntityModel<Carrito>> {
-
-    @Override
-    public EntityModel<Carrito> toModel(Carrito carrito) {
-        return EntityModel.of(carrito,
-                linkTo(methodOn(CarritoController.class)
-                        .obtenerCarritoPorId(carrito.getId())).withSelfRel(),
-                linkTo(methodOn(CarritoController.class)
-                        .listarCarrito()).withRel("listar"),
-                linkTo(methodOn(CarritoController.class)
-                        .agregarProductoAlCarrito(null)).withRel("crear"),
-                linkTo(methodOn(CarritoController.class)
-                        .actualizarCarrito(carrito.getId(), null)).withRel("editar"),
-                linkTo(methodOn(CarritoController.class)
-                        .eliminarProductoDelCarrito(carrito.getId())).withRel("eliminar"),
-                linkTo(methodOn(UsuarioController.class)
-                        .obtenerUsuarioPorId(carrito.getUsuario().getId())).withRel("usuario"),
-                linkTo(methodOn(ProductoController.class)
-                        .obtenerProductoPorId(carrito.getProducto().getId())).withRel("producto")
-        );
-    }
+@DeleteMapping("/{id}")
+public ResponseEntity<EntityModel<Map<String, String>>> eliminarProducto(
+        @PathVariable @Positive Long id) {
+    productoService.deleteById(id);
+    EntityModel<Map<String, String>> response = EntityModel.of(
+            Map.of("message", "Producto eliminado exitosamente"),
+            linkTo(methodOn(ProductoController.class)
+                .listarProductos(0, 10, "nombre", "asc"))
+                .withRel("allProductos"),
+            linkTo(methodOn(ProductoController.class)
+                .guardarProducto(null)).withRel("addProducto")
+    );
+    return ResponseEntity.ok(response);
 }
 ```
 
-**InventarioModelAssembler** — 6 enlaces (incluye relación con Producto):
+#### 3.2.5 Estructura de enlaces por recurso (actualizada)
 
-```java
-@Component
-public class InventarioModelAssembler
-        implements RepresentationModelAssembler<Inventario, EntityModel<Inventario>> {
+| Recurso | Tipo retorno | Enlaces incluidos |
+|---|---|---|
+| Producto | `EntityModel<ProductoResponseDTO>` | self, listar, crear, editar, eliminar, categoria, asignar-categoria |
+| Lista Productos | `PagedModel<EntityModel<ProductoResponseDTO>>` | self, first, last, prev, next |
+| Categoría | `EntityModel<CategoriaResponseDTO>` | self, listar, crear, editar, eliminar |
+| Carrito | `EntityModel<CarritoResponseDTO>` | self, listar, crear, editar, eliminar, usuario, producto |
+| Inventario | `EntityModel<InventarioResponseDTO>` | self, listar, crear, editar, eliminar, producto |
+| Usuario (sin password) | `EntityModel<UsuarioResponseDTO>` | self, listar, crear, editar, eliminar |
+| Venta | `EntityModel<VentaResponseDTO>` | self, listar, crear, usuario |
+| DetalleVenta | `EntityModel<DetalleVentaResponseDTO>` | self, listar, crear, editar, eliminar, venta, producto |
+| DELETE respuesta | `EntityModel<Map<String,String>>` | allProductos/allCategorias/etc, addProducto/addCategoria/etc |
 
-    @Override
-    public EntityModel<Inventario> toModel(Inventario inventario) {
-        return EntityModel.of(inventario,
-                linkTo(methodOn(InventarioController.class)
-                        .obtenerMovimientoPorId(inventario.getId())).withSelfRel(),
-                linkTo(methodOn(InventarioController.class)
-                        .listarMovimientosDeInventario()).withRel("listar"),
-                linkTo(methodOn(InventarioController.class)
-                        .registrarMovimiento(null)).withRel("crear"),
-                linkTo(methodOn(InventarioController.class)
-                        .actualizarMovimiento(inventario.getId(), null)).withRel("editar"),
-                linkTo(methodOn(InventarioController.class)
-                        .eliminarMovimiento(inventario.getId())).withRel("eliminar"),
-                linkTo(methodOn(ProductoController.class)
-                        .obtenerProductoPorId(inventario.getProducto().getId()))
-                        .withRel("producto")
-        );
-    }
-}
-```
+### 3.3 Ejemplos de respuestas JSON
 
-**UsuarioModelAssembler** — 5 enlaces:
-
-```java
-@Component
-public class UsuarioModelAssembler
-        implements RepresentationModelAssembler<Usuario, EntityModel<Usuario>> {
-
-    @Override
-    public EntityModel<Usuario> toModel(Usuario usuario) {
-        return EntityModel.of(usuario,
-                linkTo(methodOn(UsuarioController.class)
-                        .obtenerUsuarioPorId(usuario.getId())).withSelfRel(),
-                linkTo(methodOn(UsuarioController.class)
-                        .listarUsuarios()).withRel("listar"),
-                linkTo(methodOn(UsuarioController.class)
-                        .guardarUsuario(null)).withRel("crear"),
-                linkTo(methodOn(UsuarioController.class)
-                        .actualizarUsuario(usuario.getId(), null)).withRel("editar"),
-                linkTo(methodOn(UsuarioController.class)
-                        .eliminarUsuario(usuario.getId())).withRel("eliminar")
-        );
-    }
-}
-```
-
-**VentaModelAssembler** — 4 enlaces (incluye relación con Usuario):
-
-```java
-@Component
-public class VentaModelAssembler
-        implements RepresentationModelAssembler<Venta, EntityModel<Venta>> {
-
-    @Override
-    public EntityModel<Venta> toModel(Venta venta) {
-        return EntityModel.of(venta,
-                linkTo(methodOn(VentaController.class)
-                        .obtenerVentaPorId(venta.getId())).withSelfRel(),
-                linkTo(methodOn(VentaController.class)
-                        .listarVentas()).withRel("listar"),
-                linkTo(methodOn(VentaController.class)
-                        .guardarVenta(null)).withRel("crear"),
-                linkTo(methodOn(UsuarioController.class)
-                        .obtenerUsuarioPorId(venta.getUsuario().getId())).withRel("usuario")
-        );
-    }
-}
-```
-
-**DetalleVentaModelAssembler** — 7 enlaces (incluye relaciones con Venta y Producto):
-
-```java
-@Component
-public class DetalleVentaModelAssembler
-        implements RepresentationModelAssembler<DetalleVenta, EntityModel<DetalleVenta>> {
-
-    @Override
-    public EntityModel<DetalleVenta> toModel(DetalleVenta detalleVenta) {
-        return EntityModel.of(detalleVenta,
-                linkTo(methodOn(DetalleVentaController.class)
-                        .obtenerDetalleVentaPorId(detalleVenta.getId())).withSelfRel(),
-                linkTo(methodOn(DetalleVentaController.class)
-                        .listarDetalleVentas()).withRel("listar"),
-                linkTo(methodOn(DetalleVentaController.class)
-                        .guardarDetalleVenta(null)).withRel("crear"),
-                linkTo(methodOn(DetalleVentaController.class)
-                        .actualizarDetalleVenta(detalleVenta.getId(), null)).withRel("editar"),
-                linkTo(methodOn(DetalleVentaController.class)
-                        .eliminarDetalleVenta(detalleVenta.getId())).withRel("eliminar"),
-                linkTo(methodOn(VentaController.class)
-                        .obtenerVentaPorId(detalleVenta.getVenta().getId())).withRel("venta"),
-                linkTo(methodOn(ProductoController.class)
-                        .obtenerProductoPorId(detalleVenta.getProducto().getId()))
-                        .withRel("producto")
-        );
-    }
-}
-```
-
-#### 3.2.2 Estructura de enlaces por recurso
-
-| Recurso | Enlaces incluidos |
-|---|---|
-| Producto | self, listar, crear, editar, eliminar, categoria, asignar-categoria |
-| Categoría | self, listar, crear, editar, eliminar |
-| Carrito | self, listar, crear, editar, eliminar, usuario, producto |
-| Inventario | self, listar, crear, editar, eliminar, producto |
-| Usuario | self, listar, crear, editar, eliminar |
-| Venta | self, listar, crear, usuario |
-| DetalleVenta | self, listar, crear, editar, eliminar, venta, producto |
-
-#### 3.2.3 Ejemplo de respuesta JSON con HATEOAS
-
-Al consultar `GET /api/productos/1`, la respuesta ahora incluye los enlaces HATEOAS:
+#### Producto individual con DTO + links
 
 ```json
+GET /api/productos/1
+
 {
   "id": 1,
-  "nombre": "Leche Entera 1L",
-  "precio": 1200,
-  "stock": 50,
+  "nombre": "Producto 1",
+  "precio": 1100.0,
+  "stock": 21,
+  "categoriaId": 1,
+  "categoriaNombre": "Bebidas",
   "_links": {
-    "self": {
-      "href": "http://localhost:8080/api/productos/1"
-    },
-    "listar": {
-      "href": "http://localhost:8080/api/productos"
-    },
-    "crear": {
-      "href": "http://localhost:8080/api/productos"
-    },
-    "editar": {
-      "href": "http://localhost:8080/api/productos/1"
-    },
-    "eliminar": {
-      "href": "http://localhost:8080/api/productos/1"
-    },
-    "categoria": {
-      "href": "http://localhost:8080/api/productos/1/categoria"
-    },
-    "asignar-categoria": {
-      "href": "http://localhost:8080/api/productos/1/categoria"
-    }
+    "self": { "href": "http://localhost:8080/api/productos/1" },
+    "listar": { "href": "http://localhost:8080/api/productos?page=0&size=10&sortBy=nombre&sortDir=asc" },
+    "crear": { "href": "http://localhost:8080/api/productos" },
+    "editar": { "href": "http://localhost:8080/api/productos/1" },
+    "eliminar": { "href": "http://localhost:8080/api/productos/1" },
+    "categoria": { "href": "http://localhost:8080/api/productos/1/categoria" },
+    "asignar-categoria": { "href": "http://localhost:8080/api/productos/1/categoria" }
   }
 }
 ```
 
-#### 3.2.4 Subrecurso especial: Categoría desde Producto
+#### Usuario (sin password expuesto)
 
-Se implementaron dos endpoints adicionales para navegar la relación entre Producto y su Categoría:
+```json
+GET /api/usuarios/1
 
-**GET /api/productos/{id}/categoria** — Obtiene la categoría del producto con enlaces HATEOAS:
-
-```java
-@GetMapping("/{id}/categoria")
-@Operation(summary = "Obtener categoría de un producto",
-           description = "Retorna la categoría asociada a un producto")
-@ApiResponses({
-    @ApiResponse(responseCode = "200", description = "Categoría encontrada"),
-    @ApiResponse(responseCode = "404", description = "Producto no encontrado o sin categoría")
-})
-public ResponseEntity<EntityModel<Categoria>> obtenerCategoria(
-        @Parameter(description = "ID del producto", required = true) @PathVariable Long id) {
-    Producto producto = productoService.findById(id);
-    if (producto == null || producto.getCategoria() == null)
-        return ResponseEntity.notFound().build();
-    return ResponseEntity.ok(categoriaModelAssembler.toModel(producto.getCategoria()));
+{
+  "id": 1,
+  "username": "admin",
+  "roles": ["ADMIN", "USER"],
+  "_links": {
+    "self": { "href": "http://localhost:8080/api/usuarios/1" },
+    "listar": { "href": "http://localhost:8080/api/usuarios?page=0&size=10&sortBy=username&sortDir=asc" },
+    "crear": { "href": "http://localhost:8080/api/usuarios" },
+    "editar": { "href": "http://localhost:8080/api/usuarios/1" },
+    "eliminar": { "href": "http://localhost:8080/api/usuarios/1" }
+  }
 }
 ```
 
-**POST /api/productos/{id}/categoria** — Asigna una categoría existente al producto:
+#### DELETE con respuesta
 
-```java
-@PostMapping("/{id}/categoria")
-@Operation(summary = "Asignar categoría a un producto",
-           description = "Asigna una categoría existente a un producto")
-@ApiResponses({
-    @ApiResponse(responseCode = "200", description = "Categoría asignada correctamente"),
-    @ApiResponse(responseCode = "404", description = "Producto o categoría no encontrados"),
-    @ApiResponse(responseCode = "400", description = "Datos inválidos")
-})
-public ResponseEntity<EntityModel<Producto>> asignarCategoria(
-        @Parameter(description = "ID del producto", required = true) @PathVariable Long id,
-        @Valid @RequestBody AsignarCategoriaRequest request) {
-    Producto producto = productoService.asignarCategoria(id, request.getCategoriaId());
-    if (producto == null) return ResponseEntity.notFound().build();
-    return ResponseEntity.ok(productoModelAssembler.toModel(producto));
+```json
+DELETE /api/productos/1
+
+{
+  "message": "Producto eliminado exitosamente",
+  "_links": {
+    "allProductos": { "href": "http://localhost:8080/api/productos?page=0&size=10&sortBy=nombre&sortDir=asc" },
+    "addProducto": { "href": "http://localhost:8080/api/productos" }
+  }
 }
 ```
 
-### 3.3 Verificación
+#### Error estructurado
+
+```json
+GET /api/productos/999
+
+{
+  "timestamp": "2026-07-11T20:30:00",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Producto no encontrado con ID: 999",
+  "path": "uri=/api/productos/999"
+}
+```
+
+### 3.4 Verificación
 
 - [x] 7 assemblers implementados con `RepresentationModelAssembler`
-- [x] 29 endpoints retornan `EntityModel`/`CollectionModel`
+- [x] Todos los assemblers retornan DTOs (no entidades crudas)
+- [x] 29 endpoints del dominio retornan `EntityModel`/`PagedModel`
 - [x] Enlaces son dinámicos (basados en el ID del recurso)
 - [x] Uso consistente de `linkTo(methodOn(Controller.class))`
-- [x] `toCollectionModel()` heredado automáticamente de la interfaz
-- [x] Respuestas JSON incluyen `_links` con href y rel
+- [x] Paginación con `PagedModel.PageMetadata` y first/prev/next/last
+- [x] DELETE retorna 200 con mensaje + enlaces HATEOAS
+- [x] Passwords no aparecen en respuesta de usuarios
+- [x] Validación con `@Positive` en path variables
+- [x] `@Valid` en request bodies para validación de entrada
 
 ---
 
@@ -637,7 +726,7 @@ public ResponseEntity<EntityModel<Producto>> asignarCategoria(
 
 ### 4.1 Objetivo
 
-Verificar que la documentación OpenAPI es accesible a través de Swagger UI, que todos los endpoints son visibles y funcionales, y que la interfaz permite probar las operaciones CRUD del sistema.
+Verificar que la documentación OpenAPI es accesible a través de Swagger UI, que todos los endpoints son visibles y funcionales, que el esquema de seguridad JWT permite probar endpoints autenticados, y que la paginación y validación funcionan correctamente.
 
 ### 4.2 Desarrollo
 
@@ -658,54 +747,71 @@ cd /home/nicolasariel/trabajos/Experiencia3/minimarket
 ./mvnw spring-boot:run
 ```
 
-#### 4.2.2 Estructura de Swagger UI
+#### 4.2.2 Estructura de Swagger UI mejorada
 
-Al cargar Swagger UI, se observan los siguientes elementos:
+Al cargar Swagger UI, se observan:
 
-1. **Encabezado personalizado**: Muestra el título "Minimarket API" y la descripción configurada en OpenApiConfig
-2. **7 secciones de tags**: Productos, Categorías, Carrito, Inventario, Usuarios, Ventas, Detalle de Ventas
-3. **35 operaciones documentadas**: Cada una con su método HTTP, ruta, resumen y descripción
-4. **Modelos de datos**: Los schemas de Producto, Categoria, Carrito, etc., visibles en la sección "Schemas"
-5. **Botón "Try it out"**: Permite ejecutar peticiones directamente desde el navegador
+1. **Esquema de seguridad**: Botón "Authorize" con el esquema `bearerAuth` (JWT)
+2. **8 secciones de tags**: Productos, Categorías, Carrito, Inventario, Usuarios, Ventas, Detalle de Ventas, Autenticación (auth-controller)
+3. **36 operaciones documentadas**: Con método HTTP, ruta, parámetros de paginación, resumen y descripción
+4. **Links OAS visibles**: En las respuestas de los endpoints que lo incluyen (ej. `getProductoById`)
+5. **Modelos DTO visibles**: `ProductoResponseDTO`, `CategoriaResponseDTO`, `UsuarioResponseDTO`, etc.
+6. **Botón "Try it out"**: Permite ejecutar peticiones directamente desde el navegador, con soporte para paginación
+7. **Parámetros de paginación**: `page`, `size`, `sortBy`, `sortDir` visibles en cada GET de listado
 
-#### 4.2.3 Códigos HTTP verificados
+#### 4.2.3 Flujo de autenticación JWT en Swagger UI
+
+1. Ejecutar `POST /api/auth/login` con `{ "username": "admin", "password": "admin123" }`
+2. Copiar el token JWT de la respuesta
+3. Click en el botón "Authorize" en la parte superior
+4. Pegar el token en el campo `Value`: `Bearer <token>`
+5. Todos los endpoints protegidos ahora son accesibles desde Swagger UI
+
+#### 4.2.4 Códigos HTTP verificados (actualizados)
 
 | Método HTTP | Código esperado | Contexto |
 |---|---|---|
 | GET | 200 OK | Recurso encontrado |
 | POST | 201 Created | Recurso creado exitosamente |
 | PUT | 200 OK | Recurso actualizado exitosamente |
-| DELETE | 204 No Content | Recurso eliminado exitosamente |
-| GET/POST/PUT | 400 Bad Request | Datos de entrada inválidos |
+| DELETE | 200 OK | Recurso eliminado (con mensaje + links) |
+| POST/PUT | 400 Bad Request | Datos de entrada inválidos (validación) |
 | GET/PUT/DELETE | 404 Not Found | Recurso no encontrado |
+| POST /api/auth/login | 200 OK | Token JWT retornado |
+| Acceso sin token | 401/403 | Endpoint protegido rechaza petición |
 
-#### 4.2.4 Pruebas realizadas desde Swagger UI
+#### 4.2.5 Pruebas realizadas desde Swagger UI
 
-Se probaron los siguientes escenarios desde Swagger UI:
+1. **Login JWT** — `POST /api/auth/login` → 200 OK con token
+2. **GET /api/productos (paginado)** — Lista paginada con first/prev/next/last (200 OK)
+3. **GET /api/productos?page=0&size=5&sortBy=precio&sortDir=desc** — Ordenamiento (200 OK)
+4. **POST /api/productos** — Crear producto con validación (201 Created)
+5. **GET /api/productos/{id}** — Obtener producto con _links OAS visibles (200 OK)
+6. **PUT /api/productos/{id}** — Actualizar producto con @Valid (200 OK)
+7. **DELETE /api/productos/{id}** — Eliminar con respuesta estructurada (200 OK)
+8. **GET /api/productos/{id}** — Producto eliminado (404 Not Found con ErrorResponse)
+9. **GET /api/usuarios** — Lista sin exponer passwords (200 OK)
+10. **POST con datos inválidos** — 400 Bad Request con detalles de validación
 
-1. **GET /api/productos** — Lista vacía inicial (200 OK)
-2. **POST /api/productos** — Crear producto (201 Created)
-3. **GET /api/productos/{id}** — Obtener producto creado (200 OK con _links)
-4. **PUT /api/productos/{id}** — Actualizar producto (200 OK)
-5. **DELETE /api/productos/{id}** — Eliminar producto (204 No Content)
-6. **GET /api/productos/{id}** — Producto eliminado (404 Not Found)
-7. **GET /api/productos/{id}/categoria** — Categoría de producto (200 OK o 404)
-8. **POST /api/productos/{id}/categoria** — Asignar categoría (200 OK)
-
-#### 4.2.5 Resultados de compilación y tests
+#### 4.2.6 Resultados de compilación y tests
 
 ```bash
-./mvnw clean compile   # BUILD SUCCESS (55 source files)
+./mvnw clean compile   # BUILD SUCCESS (71 source files)
 ./mvnw clean test      # Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
 ```
 
+JaCoCo report generado en `target/site/jacoco/index.html`.
+
 ### 4.3 Evidencias
 
-- **Swagger UI** visualiza todos los endpoints agrupados por tags
-- **Modelos** aparecen con sus campos y tipos de datos
-- **Parámetros de ruta** documentados con descripciones
+- **Swagger UI** visualiza los 36 endpoints agrupados por 8 tags
+- **Botón Authorize** presente con esquema bearerAuth (JWT)
+- **Modelos DTO** aparecen con sus campos y tipos de datos
+- **Parámetros de paginación** documentados en cada GET de listado
+- **Parámetros de ruta** con validación `@Positive` visible
 - **Códigos de respuesta** especificados para cada operación
-- **Ejemplos de respuesta** visibles al expandir cada endpoint
+- **Links OAS** visibles en las respuestas (ej. self, allProductos)
+- **ErrorResponse** visible en schemas con timestamp, status, error, message, path
 
 ---
 
@@ -715,13 +821,13 @@ Se probaron los siguientes escenarios desde Swagger UI:
 
 ### 5.1 Objetivo
 
-Analizar el impacto técnico de implementar OpenAPI y HATEOAS en el sistema Minimarket, reflexionando sobre cómo estas tecnologías afectan la calidad del software, la mantenibilidad, la navegabilidad y la escalabilidad del sistema.
+Analizar el impacto técnico de implementar OpenAPI, HATEOAS, JWT, DTOs, paginación, validación y manejo de excepciones en el sistema Minimarket, reflexionando sobre cómo estas tecnologías afectan la calidad del software, la mantenibilidad, la navegabilidad y la escalabilidad.
 
 ### 5.2 Análisis comparativo antes y después
 
 #### 5.2.1 Comparación de código: Controlador ProductoController
 
-**Antes (sin OpenAPI ni HATEOAS):**
+**Antes (sin OpenAPI, HATEOAS, paginación, DTOs):**
 
 ```java
 @RestController
@@ -742,15 +848,22 @@ public class ProductoController {
         if (producto == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(producto);
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> eliminarProducto(@PathVariable Long id) {
+        productoService.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
 }
 ```
 
-**Después (con OpenAPI y HATEOAS):**
+**Después (con OpenAPI, HATEOAS, paginación, DTOs, validación, JWT):**
 
 ```java
 @RestController
 @RequestMapping("/api/productos")
 @Tag(name = "Productos", description = "Operaciones CRUD para la gestión de productos")
+@SecurityRequirement(name = "bearerAuth")
 public class ProductoController {
 
     @Autowired
@@ -759,29 +872,40 @@ public class ProductoController {
     private ProductoModelAssembler productoModelAssembler;
 
     @GetMapping
-    @Operation(summary = "Listar todos los productos",
-               description = "Retorna una lista con todos los productos registrados")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200",
-                     description = "Lista de productos obtenida correctamente")
-    })
-    public ResponseEntity<CollectionModel<EntityModel<Producto>>> listarProductos() {
-        return ResponseEntity.ok(
-                productoModelAssembler.toCollectionModel(productoService.findAll()));
+    @Operation(summary = "Listar todos los productos", description = "...",
+               operationId = "listarProductos")
+    public ResponseEntity<PagedModel<EntityModel<ProductoResponseDTO>>> listarProductos(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "nombre") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir) {
+        // ... lógica de paginación con PagedModel y links first/prev/next/last
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Obtener un producto por ID",
-               description = "Retorna un producto según su ID")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Producto encontrado"),
-        @ApiResponse(responseCode = "404", description = "Producto no encontrado")
+    @Operation(summary = "Obtener un producto por ID", operationId = "obtenerProductoPorId",
+        responses = {
+            @ApiResponse(responseCode = "200",
+                links = {
+                    @Link(name = "self", operationId = "obtenerProductoPorId"),
+                    @Link(name = "allProductos", operationId = "listarProductos")
+                })
     })
-    public ResponseEntity<EntityModel<Producto>> obtenerProductoPorId(
-            @Parameter(description = "ID del producto", required = true) @PathVariable Long id) {
-        Producto producto = productoService.findById(id);
-        if (producto == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok(productoModelAssembler.toModel(producto));
+    public ResponseEntity<EntityModel<ProductoResponseDTO>> obtenerProductoPorId(
+            @Parameter(description = "ID del producto", required = true, example = "1")
+            @PathVariable @Positive Long id) {
+        return ResponseEntity.ok(productoModelAssembler.toModel(productoService.findById(id)));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<EntityModel<Map<String, String>>> eliminarProducto(
+            @PathVariable @Positive Long id) {
+        productoService.deleteById(id);
+        return ResponseEntity.ok(EntityModel.of(
+            Map.of("message", "Producto eliminado exitosamente"),
+            linkTo(...).withRel("allProductos"),
+            linkTo(...).withRel("addProducto")
+        ));
     }
 }
 ```
@@ -790,41 +914,46 @@ public class ProductoController {
 
 | Aspecto | Antes | Después |
 |---|---|---|
-| Tipo de retorno GET lista | `ResponseEntity<List<Producto>>` | `ResponseEntity<CollectionModel<EntityModel<Producto>>>` |
-| Tipo de retorno GET individual | `ResponseEntity<Producto>` | `ResponseEntity<EntityModel<Producto>>` |
-| Documentación de endpoints | Ausente | `@Tag`, `@Operation`, `@ApiResponses` |
-| Enlaces en respuesta | No | `_links` con self, listar, crear, editar, eliminar, etc. |
-| Dependencias externas | Solo Spring Web | + spring-boot-starter-hateoas, springdoc-openapi |
-| Códigos HTTP documentados | No | 200, 201, 204, 400, 404 |
+| Tipo retorno GET lista | `List<Producto>` | `PagedModel<EntityModel<ProductoResponseDTO>>` |
+| Tipo retorno GET individual | `Producto` (entidad cruda) | `EntityModel<ProductoResponseDTO>` (DTO) |
+| DELETE respuesta | `204 No Content` | `200 + EntityModel<Map>` con mensaje y links |
+| Paginación | No | `page`, `size`, `sortBy`, `sortDir` |
+| Validación de entrada | No | `@Valid`, `@Positive` |
+| Seguridad | Form Login | JWT stateless con `@SecurityRequirement("bearerAuth")` |
+| Manejo de errores | `return null` manual | `GlobalExceptionHandler` + `ResourceNotFoundException` |
+| Documentación | Ninguna | `@Tag`, `@Operation`, `@ApiResponses`, `@Link` |
+| Passwords expuestos | Sí | No (DTO oculta `password`) |
 
 #### 5.2.2 Comparación de respuestas JSON
 
-**Antes — Respuesta GET /api/productos:**
+**Antes — GET /api/productos:**
 ```json
 [
   {
     "id": 1,
-    "nombre": "Leche Entera 1L",
+    "nombre": "Leche Entera",
     "precio": 1200,
     "stock": 50,
-    "categoria": null
+    "categoria": { "id": 1, "nombre": "Lácteos", "productos": null }
   }
 ]
 ```
 
-**Después — Respuesta GET /api/productos con HATEOAS:**
+**Después — GET /api/productos (paginado, DTO, HATEOAS):**
 ```json
 {
   "_embedded": {
-    "productoList": [
+    "productos": [
       {
         "id": 1,
-        "nombre": "Leche Entera 1L",
-        "precio": 1200,
-        "stock": 50,
+        "nombre": "Producto 1",
+        "precio": 1100.0,
+        "stock": 21,
+        "categoriaId": 1,
+        "categoriaNombre": "Bebidas",
         "_links": {
           "self": { "href": "http://localhost:8080/api/productos/1" },
-          "listar": { "href": "http://localhost:8080/api/productos" },
+          "listar": { "href": "http://localhost:8080/api/productos?page=0&size=10&..." },
           "crear": { "href": "http://localhost:8080/api/productos" },
           "editar": { "href": "http://localhost:8080/api/productos/1" },
           "eliminar": { "href": "http://localhost:8080/api/productos/1" },
@@ -835,74 +964,71 @@ public class ProductoController {
     ]
   },
   "_links": {
-    "self": { "href": "http://localhost:8080/api/productos" }
+    "self": { "href": "..." },
+    "first": { "href": "..." },
+    "last": { "href": "..." },
+    "next": { "href": "..." }
+  },
+  "page": {
+    "size": 10,
+    "totalElements": 50,
+    "totalPages": 5,
+    "number": 0
   }
 }
 ```
 
-### 5.3 Reflexión técnica
+### 5.3 Reflexión técnica ampliada
 
-#### 5.3.1 Impacto en la mantenibilidad del código
+#### 5.3.1 Impacto en la seguridad
 
-La implementación de OpenAPI tiene un impacto profundamente positivo en la mantenibilidad del sistema por las siguientes razones:
+La migración de Form Login a JWT stateless representa un avance significativo:
+- **Tokens sin estado**: El servidor no mantiene sesiones, cada request se autentica independientemente
+- **DTOs ocultan datos**: `UsuarioResponseDTO` no expone `password` ni datos internos de la entidad
+- **Monitoreo**: `SuspiciousActivityService` registra intentos fallidos de login, JWT inválidos y tasa de requests
+- **Password Encoding**: BCryptPasswordEncoder aplicado en el service layer al crear/actualizar usuarios
+- **Sanitización**: Jsoup para prevenir XSS en inputs de texto
 
-1. **Documentación viva**: La documentación ya no es un documento separado que debe actualizarse manualmente. Con OpenAPI, la documentación vive en el código fuente a través de anotaciones (`@Operation`, `@ApiResponses`, `@Tag`). Cuando un desarrollador modifica un endpoint, la documentación se actualiza automáticamente en la siguiente compilación. Esto elimina el problema clásico de la documentación desactualizada.
+#### 5.3.2 Impacto en la mantenibilidad
 
-2. **Claridad del contrato**: Cada endpoint ahora especifica explícitamente:
-   - Qué hace (summary + description)
-   - Qué parámetros espera (@Parameter)
-   - Qué códigos HTTP puede retornar (@ApiResponses)
-   - Qué modelo de datos utiliza (@Schema)
-   Esto convierte a los controladores en especificaciones vivas del contrato API.
+1. **Documentación viva con esteroides**: Además de las anotaciones OpenAPI, los `@Link` en `@ApiResponse` documentan la navegabilidad HATEOAS directamente en el spec OAS
+2. **Manejo centralizado de errores**: `GlobalExceptionHandler` con `ErrorResponse` estructurado garantiza consistencia en todas las respuestas de error
+3. **DTOs como capa de abstracción**: Los DTOs protegen la evolución de las entidades internas sin romper el contrato de la API
+4. **Validación declarativa**: `@NotBlank`, `@Size`, `@Min`, `@Positive` en entidades + `@Valid` en controladores = validación consistente sin código boilerplate
 
-3. **Reducción de la deuda técnica**: Antes, un desarrollador nuevo debía leer el código de cada controlador para entender su funcionamiento. Ahora, con solo abrir Swagger UI, cualquier miembro del equipo comprende el 100% de la superficie de la API.
+#### 5.3.3 Impacto en la navegabilidad (HATEOAS avanzado)
 
-4. **Desacoplamiento de URLs con HATEOAS**: La implementación de los ModelAssembler centraliza la construcción de URLs. Si una ruta cambia (por ejemplo, de `/api/productos` a `/api/v1/productos`), solo se modifica el assembler, no cada controlador ni los clientes que siguen los enlaces.
+1. **Paginación navegable**: `PagedModel` con `first`, `prev`, `next`, `last` permite a los clientes recorrer colecciones grandes sin necesidad de hardcodear parámetros
+2. **Ordenamiento**: `sortBy` y `sortDir` documentados en cada GET de listado
+3. **DELETE autodescriptivo**: La respuesta DELETE incluye enlaces para volver a la lista y crear un nuevo recurso, guiando al cliente en el flujo natural
+4. **Links OAS documentados**: Los `@Link` en `@ApiResponse` permiten que herramientas de generación de clientes comprendan la navegabilidad
 
-#### 5.3.2 Impacto en la navegabilidad
+#### 5.3.4 Impacto en la escalabilidad
 
-Antes de HATEOAS, la navegación de la API dependía completamente de que el cliente conociera las URLs específicas de antemano. Esto creaba un acoplamiento fuerte entre el cliente y la estructura de rutas del servidor.
+1. **JWT para microservicios**: La autenticación stateless es fundamental para escalar horizontalmente
+2. **Paginación**: Evita cargar datasets completos en memoria, preparando el sistema para crecimiento
+3. **Actuator + HikariCP**: Monitoreo de salud y pool de conexiones configurado para entornos productivos
+4. **JaCoCo**: Cobertura de tests medible y visible para garantizar calidad en el crecimiento del código
+5. **DataInitializer**: Seed de datos facilita desarrollo, testing y demos sin configuración manual
 
-Con HATEOAS, la navegabilidad mejora significativamente:
+#### 5.3.5 Desafíos y lecciones aprendidas
 
-1. **Descubrimiento de recursos**: Un cliente puede comenzar con la URL base de la API y descubrir todos los recursos disponibles siguiendo los enlaces en las respuestas. Por ejemplo, al obtener un producto, el cliente descubre que puede navegar a su categoría a través del enlace `categoria`. No necesita saber que la URL es `/api/productos/{id}/categoria`.
-
-2. **Relaciones entre recursos**: Los enlaces como `usuario` en CarritoModelAssembler o `producto` en InventarioModelAssembler permiten navegar naturalmente entre entidades relacionadas. Esto refleja la naturaleza relacional de los datos en la propia API.
-
-3. **Subrecursos**: La implementación de `GET /api/productos/{id}/categoria` como subrecurso ejemplifica el patrón correcto de navegación HATEOAS: desde el recurso Producto se accede al recurso relacionado Categoría.
-
-4. **Independencia del cliente**: Un cliente bien implementado que sigue enlaces HATEOAS no se rompe cuando cambian las URLs del servidor. Esto es un principio fundamental de REST de nivel 3 (the Richardson Maturity Model).
-
-#### 5.3.3 Impacto en la escalabilidad
-
-1. **Estandarización OpenAPI**: La especificación OAS generada automáticamente permite:
-   - Integración con herramientas de generación de clientes (OpenAPI Generator)
-   - Pruebas automatizadas de contrato (contract testing)
-   - Documentación para integradores externos sin acceso al código fuente
-   - Versionado semántico de la API a través de la versión en OpenApiConfig
-
-2. **Preparación para microservicios**: Aunque Minimarket es un monolito, las prácticas aquí implementadas —documentación OAS, HATEOAS, validación — son fundamentales en arquitecturas de microservicios donde múltiples servicios deben interoperar.
-
-3. **Swagger UI como herramienta de testing**: Swagger UI permite a cualquier miembro del equipo (backend, frontend, QA) probar endpoints sin necesidad de instalar herramientas adicionales como Postman ni de escribir código de prueba ad-hoc.
-
-#### 5.3.4 Desafíos y consideraciones
-
-1. **Complejidad inicial**: La implementación de HATEOAS agrega una capa adicional de abstracción (los ModelAssembler) que aumenta la cantidad de archivos y la complejidad de la respuesta JSON. Para una API pequeña, esto puede ser sobreingeniería.
-
-2. **Documentación extra**: Las anotaciones de OpenAPI, aunque automatizan la documentación, representan líneas adicionales de código que deben ser mantenidas. Sin embargo, este costo inicial es ampliamente compensado por los beneficios.
-
-3. **Curva de aprendizaje**: Tanto OpenAPI como HATEOAS requieren que el equipo de desarrollo comprenda conceptos nuevos como OAS, HAL, RepresentationModelAssembler y WebMvcLinkBuilder.
+1. **DTOs + Assemblers**: La combinación añade una capa de código pero protege la API contra cambios internos
+2. **JWT vs Form Login**: La migración requiere más infraestructura (`JwtUtil`, `JwtAuthenticationFilter`, `AuthController`) pero habilita la escalabilidad
+3. **Paginación en múltiples controladores**: El patrón `PagedModel` es repetitivo pero consistente y predecible para los clientes
+4. **Validación en entidades vs DTOs**: Las anotaciones de validación en entidades (`@Entity`) se ejecutan antes de la persistencia, protegiendo la integridad de datos
 
 ### 5.4 Conclusión
 
-La implementación de OpenAPI y HATEOAS en el sistema Minimarket representa un salto cualitativo en la madurez de la API. Al pasar de un diseño REST de Nivel 2 (Richardson Maturity Model) a uno de Nivel 3, el sistema se vuelve:
+El sistema Minimarket ha pasado de un diseño REST de Nivel 2 a uno de Nivel 3 (Richardson Maturity Model) con mejoras sustanciales en cada capa:
 
-- **Más mantenible**: la documentación vive en el código
-- **Más navegable**: los clientes descubren la API mediante enlaces
-- **Más escalable**: preparado para integraciones y microservicios
-- **Más profesional**: cumple con estándares de la industria (OpenAPI 3.0)
+- **Capa de presentación**: DTOs que ocultan entidades, `@Link` en OAS, `@SecurityRequirement` en Swagger
+- **Capa de negocio**: Validación declarativa, manejo centralizado de excepciones, password encoding
+- **Capa de datos**: Paginación, ordenamiento, HikariCP connection pool
+- **Capa de seguridad**: JWT stateless, SuspiciousActivityService, endpoints públicos/privados bien definidos
+- **Capa de operaciones**: Actuator health checks, JaCoCo cobertura, DataInitializer seed
 
-Estas mejoras tienen un costo de implementación moderado (creación de assemblers y anotaciones) pero un retorno de inversión alto en términos de reducción de consultas entre equipos, menor tiempo de incorporación de nuevos desarrolladores y mayor calidad del contrato API.
+71 archivos fuente, 36 endpoints, 7 DTOs, 7 assemblers, 8 entidades validadas, 4 tests pasando.
 
 ---
 
@@ -912,291 +1038,160 @@ Estas mejoras tienen un costo de implementación moderado (creación de assemble
 
 ### 6.1 Objetivo
 
-Documentar el proceso completo de implementación, actualizar el README con la informacion del proyecto y subir el codigo a GitHub con una estructura clara y organizada.
+Documentar el proceso completo de implementación, actualizar el README con toda la información del proyecto y subir el código a GitHub con una estructura clara y organizada.
 
 ### 6.2 Desarrollo
 
-#### 6.2.1 Estructura del proyecto
+#### 6.2.1 Estructura del proyecto completa
 
 ```
-Experiencia3/
-├── contexto-sesion.md                   # Resumen ejecutivo del sprint
-├── planificacion.md                     # Plan de desarrollo metodologico
-├── planificacion-codigo.md              # Plan tecnico paso a paso
-├── desarrollo-preguntas.md              # Respuestas al formulario
-├── Semana7/                             # PDFs de la semana 7
-│   ├── Guia de aprendizaje
-│   ├── Pauta de evaluacion
-│   └── Formato de respuesta
-├── Semana8/                             # PDFs de la semana 8
-│   ├── Guia de aprendizaje
-│   ├── Pauta de evaluacion
-│   └── Formato de respuesta
-└── minimarket/                          # Proyecto Spring Boot
-    ├── pom.xml
-    └── src/
-        └── main/java/com/minimarket/
-            ├── MinimarketApplication.java
-            ├── config/
-            │   └── OpenApiConfig.java
-            ├── dto/
-            │   └── AsignarCategoriaRequest.java
-            ├── assembler/
-            │   ├── ProductoModelAssembler.java
-            │   ├── CategoriaModelAssembler.java
-            │   ├── CarritoModelAssembler.java
-            │   ├── InventarioModelAssembler.java
-            │   ├── UsuarioModelAssembler.java
-            │   ├── VentaModelAssembler.java
-            │   └── DetalleVentaModelAssembler.java
-            ├── controller/
-            │   ├── ProductoController.java
-            │   ├── CategoriaController.java
-            │   ├── CarritoController.java
-            │   ├── InventarioController.java
-            │   ├── UsuarioController.java
-            │   ├── VentaController.java
-            │   ├── DetalleVentaController.java
-            │   └── HolaMundoController.java
-            ├── service/
-            │   ├── ProductoService.java
-            │   └── impl/ProductoServiceImpl.java
-            ├── entity/
-            ├── repository/
-            └── security/config/SecurityConfig.java
+minimarket/
+├── pom.xml
+├── README.md
+├── desarrollo-preguntas.md
+└── src/
+    ├── main/java/com/minimarket/
+    │   ├── MinimarketApplication.java
+    │   ├── config/
+    │   │   ├── OpenApiConfig.java               # @SecurityScheme JWT
+    │   │   └── DataInitializer.java             # Seed datos prueba
+    │   ├── dto/
+    │   │   ├── AsignarCategoriaRequest.java
+    │   │   ├── ProductoResponseDTO.java          # 7 DTOs de respuesta
+    │   │   ├── CategoriaResponseDTO.java
+    │   │   ├── UsuarioResponseDTO.java           # Sin password
+    │   │   ├── CarritoResponseDTO.java
+    │   │   ├── InventarioResponseDTO.java
+    │   │   ├── VentaResponseDTO.java
+    │   │   └── DetalleVentaResponseDTO.java
+    │   ├── exception/
+    │   │   ├── ErrorResponse.java                # Estructura error
+    │   │   ├── GlobalExceptionHandler.java       # Manejo centralizado
+    │   │   └── ResourceNotFoundException.java
+    │   ├── assembler/                            # 7 assemblers HATEOAS
+    │   │   ├── ProductoModelAssembler.java
+    │   │   ├── CategoriaModelAssembler.java
+    │   │   ├── CarritoModelAssembler.java
+    │   │   ├── InventarioModelAssembler.java
+    │   │   ├── UsuarioModelAssembler.java
+    │   │   ├── VentaModelAssembler.java
+    │   │   └── DetalleVentaModelAssembler.java
+    │   ├── controller/                           # 8 controladores
+    │   │   ├── ProductoController.java
+    │   │   ├── CategoriaController.java
+    │   │   ├── CarritoController.java
+    │   │   ├── InventarioController.java
+    │   │   ├── UsuarioController.java
+    │   │   ├── VentaController.java
+    │   │   ├── DetalleVentaController.java
+    │   │   └── HolaMundoController.java
+    │   ├── service/                              # 8 interfaces + 8 impl
+    │   ├── entity/                               # 8 entidades con @Valid
+    │   ├── repository/                           # 8 repositorios JPA
+    │   └── security/
+    │       ├── config/
+    │       │   ├── SecurityConfig.java           # JWT stateless
+    │       │   └── JwtProperties.java            # Config JWT
+    │       ├── controller/
+    │       │   └── AuthController.java           # POST /api/auth/login
+    │       ├── filter/
+    │       │   └── JwtAuthenticationFilter.java  # Filtro JWT
+    │       ├── model/
+    │       │   ├── CustomUserDetails.java
+    │       │   ├── JwtResponse.java
+    │       │   └── LoginRequest.java
+    │       ├── monitor/
+    │       │   └── SuspiciousActivityService.java
+    │       ├── service/
+    │       │   └── CustomUserDetailsService.java
+    │       └── util/
+    │           └── JwtUtil.java
+    └── test/java/com/minimarket/
+        ├── MinimarketApplicationTests.java
+        └── UsuarioTest.java
 ```
 
-#### 6.2.2 Nuevos archivos creados (10)
+#### 6.2.2 Nuevos archivos creados (31)
 
-| Archivo | Proposito |
+| Categoría | Archivos |
 |---|---|
-| `config/OpenApiConfig.java` | Bean OpenAPI con titulo, descripcion, version 1.0.0, contacto, licencia Apache 2.0 |
-| `dto/AsignarCategoriaRequest.java` | DTO con `@NotNull Long categoriaId` + `@Schema` para Swagger |
-| `assembler/ProductoModelAssembler.java` | 7 enlaces HATEOAS (self, listar, crear, editar, eliminar, categoria, asignar-categoria) |
-| `assembler/CategoriaModelAssembler.java` | 5 enlaces (self, listar, crear, editar, eliminar) |
-| `assembler/CarritoModelAssembler.java` | 7 enlaces (self, listar, crear, editar, eliminar, usuario, producto) |
-| `assembler/InventarioModelAssembler.java` | 6 enlaces (self, listar, crear, editar, eliminar, producto) |
-| `assembler/UsuarioModelAssembler.java` | 5 enlaces (self, listar, crear, editar, eliminar) |
-| `assembler/VentaModelAssembler.java` | 4 enlaces (self, listar, crear, usuario) |
-| `assembler/DetalleVentaModelAssembler.java` | 7 enlaces (self, listar, crear, editar, eliminar, venta, producto) |
+| DTOs | `ProductoResponseDTO.java`, `CategoriaResponseDTO.java`, `UsuarioResponseDTO.java`, `CarritoResponseDTO.java`, `InventarioResponseDTO.java`, `VentaResponseDTO.java`, `DetalleVentaResponseDTO.java` |
+| Excepciones | `ErrorResponse.java`, `GlobalExceptionHandler.java`, `ResourceNotFoundException.java` |
+| Seguridad JWT | `JwtProperties.java`, `JwtUtil.java`, `JwtAuthenticationFilter.java`, `AuthController.java`, `JwtResponse.java`, `LoginRequest.java` |
+| Monitoreo | `SuspiciousActivityService.java` |
+| Configuración | `DataInitializer.java` |
+| Total | **31 nuevos archivos + 40 modificados = 71 source files** |
 
-#### 6.2.3 Archivos modificados (11)
+#### 6.2.3 Archivos originales modificados (11 controladores/servicios + config)
 
-| Archivo | Cambio |
+| Archivo | Cambio principal |
 |---|---|
-| `pom.xml` | + `spring-boot-starter-hateoas`, + `springdoc-openapi-starter-webmvc-ui:2.8.5`, + `spring-boot-starter-validation` |
-| `SecurityConfig.java` | + rutas publicas `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**` |
-| `application.properties` | Encoding ISO-8859-1 a UTF-8 |
-| `ProductoService.java` | + metodo `asignarCategoria(Long productoId, Long categoriaId)` |
-| `ProductoServiceImpl.java` | + implementacion con inyeccion de `CategoriaRepository` |
-| `ProductoController.java` | + `@Tag`, `@Operation`, `@ApiResponses`, `EntityModel`/`CollectionModel`, subrecursos |
-| `CategoriaController.java` | + OpenAPI + HATEOAS |
-| `CarritoController.java` | + OpenAPI + HATEOAS |
-| `InventarioController.java` | + OpenAPI + HATEOAS |
-| `UsuarioController.java` | + OpenAPI + HATEOAS |
-| `VentaController.java` | + OpenAPI + HATEOAS |
-| `DetalleVentaController.java` | + OpenAPI + HATEOAS |
+| `pom.xml` | + JWT (jjwt), Jsoup, Actuator, JaCoCo, test props |
+| `OpenApiConfig.java` | Reescrito con `@SecurityScheme("bearerAuth")` |
+| `SecurityConfig.java` | Form Login → JWT stateless + `DaoAuthenticationProvider` |
+| `application.properties` | + HikariCP, Actuator, JWT secret/expiration |
+| `7 Controllers` | + Paginación, DTOs, `@Valid`, `@Positive`, DELETE 200, `@SecurityRequirement` |
+| `7 Assemblers` | + DTOs como tipo de retorno, enlaces con params de paginación |
+| `8 Entity classes` | + `@NotBlank`, `@Size`, `@Min`, `@NotNull`, no-arg constructors |
+| `8 Service Impls` | + `Pageable` methods, `ResourceNotFoundException`, password encoding |
+| `8 Service Interfaces` | + `findAll(Pageable)` methods, `updateUsuario`, `getUsuarioByIdOrThrow` |
+| `README.md` | Reescrito completo con JWT, paginación, DTOs, nuevos endpoints |
 
-#### 6.2.4 README.md
+#### 6.2.4 README.md actualizado
 
-```markdown
-# Minimarket Plus - Sistema de Gestion de Minimarket
+El README fue completamente reescrito para reflejar todas las mejoras:
+- Tecnologías actualizadas (JWT, Jsoup, JaCoCo, Actuator)
+- Sección de Autenticación JWT con flujo de login
+- Sección de Datos de prueba (seed automático)
+- Tabla de paginación y ordenamiento
+- Nuevos códigos HTTP (DELETE 200)
+- Ejemplos de respuesta actualizados (DTOs, paginación, DELETE, errores)
+- Estructura de proyecto completa (71 archivos)
+- Sección de Seguridad con JWT, BCrypt, SuspiciousActivityService
+- Sección de Validación con Bean Validation
+- Acceso a Actuator health/info
 
-## Descripcion
-
-API REST desarrollada con **Spring Boot 3.4.1** y **JDK 17** para la gestion de un minimarket.
-El sistema implementa operaciones CRUD para productos, categorias, carrito de compras,
-inventario, usuarios, ventas y detalle de ventas, utilizando **JPA** con base de datos **H2**
-en memoria y **Spring Security** para la autenticacion.
-
-## Tecnologias Utilizadas
-
-| Tecnologia | Version |
-|---|---|
-| Spring Boot | 3.4.1 |
-| JDK | 17 |
-| Spring Data JPA | - |
-| Spring Security | - |
-| Spring HATEOAS | - |
-| SpringDoc OpenAPI | 2.8.5 |
-| H2 Database | - |
-| Lombok | - |
-| Maven | - |
-
-## Dependencias Clave
-
-```xml
-<!-- HATEOAS para enlaces dinamicos -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-hateoas</artifactId>
-</dependency>
-
-<!-- OpenAPI / Swagger UI -->
-<dependency>
-    <groupId>org.springdoc</groupId>
-    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-    <version>2.8.5</version>
-</dependency>
-
-<!-- Validacion de datos -->
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-validation</artifactId>
-</dependency>
-```
-
-## Como compilar y ejecutar
+#### 6.2.5 Comandos de compilación y verificación
 
 ```bash
-export JAVA_HOME="$HOME/jdk17"
-export PATH="$JAVA_HOME/bin:$PATH"
-cd minimarket/
-./mvnw clean compile   # Compilar
-./mvnw clean test        # Ejecutar tests
-./mvnw spring-boot:run # Iniciar servidor
-```
-
-## Acceso a la documentacion
-
-Una vez ejecutando la aplicacion, abrir en el navegador:
-
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
-- **Especificacion OAS**: http://localhost:8080/v3/api-docs
-
-## Endpoints de la API
-
-### Productos
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/productos | Listar todos los productos |
-| GET | /api/productos/{id} | Obtener producto por ID |
-| POST | /api/productos | Crear producto |
-| PUT | /api/productos/{id} | Actualizar producto |
-| DELETE | /api/productos/{id} | Eliminar producto |
-| GET | /api/productos/{id}/categoria | Obtener categoria del producto |
-| POST | /api/productos/{id}/categoria | Asignar categoria al producto |
-
-### Categorias
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/categorias | Listar categorias |
-| GET | /api/categorias/{id} | Obtener categoria por ID |
-| POST | /api/categorias | Crear categoria |
-| PUT | /api/categorias/{id} | Actualizar categoria |
-| DELETE | /api/categorias/{id} | Eliminar categoria |
-
-### Carrito
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/carrito | Listar carrito |
-| GET | /api/carrito/{id} | Obtener item por ID |
-| POST | /api/carrito | Agregar producto |
-| PUT | /api/carrito/{id} | Actualizar item |
-| DELETE | /api/carrito/{id} | Eliminar item |
-
-### Inventario
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/inventario | Listar movimientos |
-| GET | /api/inventario/{id} | Obtener movimiento por ID |
-| POST | /api/inventario | Registrar movimiento |
-| PUT | /api/inventario/{id} | Actualizar movimiento |
-| DELETE | /api/inventario/{id} | Eliminar movimiento |
-
-### Usuarios
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/usuarios | Listar usuarios |
-| GET | /api/usuarios/{id} | Obtener usuario por ID |
-| POST | /api/usuarios | Crear usuario |
-| PUT | /api/usuarios/{id} | Actualizar usuario |
-| DELETE | /api/usuarios/{id} | Eliminar usuario |
-
-### Ventas
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/ventas | Listar ventas |
-| GET | /api/ventas/{id} | Obtener venta por ID |
-| POST | /api/ventas | Registrar venta |
-
-### Detalle de Ventas
-| Metodo | Ruta | Descripcion |
-|---|---|---|
-| GET | /api/detalle-ventas | Listar detalles |
-| GET | /api/detalle-ventas/{id} | Obtener detalle por ID |
-| POST | /api/detalle-ventas | Crear detalle |
-| PUT | /api/detalle-ventas/{id} | Actualizar detalle |
-| DELETE | /api/detalle-ventas/{id} | Eliminar detalle |
-
-## HATEOAS
-
-Todas las respuestas incluyen enlaces `_links` que permiten navegar entre recursos
-relacionados. Por ejemplo, al obtener un producto:
-
-```json
-{
-  "id": 1,
-  "nombre": "Leche Entera 1L",
-  "precio": 1200,
-  "stock": 50,
-  "_links": {
-    "self": { "href": "http://localhost:8080/api/productos/1" },
-    "listar": { "href": "http://localhost:8080/api/productos" },
-    "crear": { "href": "http://localhost:8080/api/productos" },
-    "editar": { "href": "http://localhost:8080/api/productos/1" },
-    "eliminar": { "href": "http://localhost:8080/api/productos/1" },
-    "categoria": { "href": "http://localhost:8080/api/productos/1/categoria" },
-    "asignar-categoria": { "href": "http://localhost:8080/api/productos/1/categoria" }
-  }
-}
-```
-
-## Beneficios de OpenAPI y HATEOAS
-
-### OpenAPI
-- Documentacion viva que se actualiza automaticamente con el codigo
-- Interfaz grafica interactiva (Swagger UI) para probar los endpoints
-- Especificacion estandarizada que permite integracion con herramientas externas
-- Versionado semantico de la API
-
-### HATEOAS
-- Clientes descubren la API navegando enlaces en lugar de URLs hardcodeadas
-- Desacoplamiento entre cliente y servidor: cambiar rutas no rompe clientes
-- Relaciones entre recursos visibles en las propias respuestas
-- APIs autodescriptivas y auto-contenidas
-
-## Evidencias
-
-(Incluir capturas de Swagger UI, ejemplos de respuestas JSON con _links
-y resultados de compilacion/tests)
-```
-
-#### 6.2.5 Comandos de compilacion y verificacion
-
-```bash
-# Compilar el proyecto (55 source files)
+# Compilar el proyecto (71 source files)
 ./mvnw clean compile  # BUILD SUCCESS
 
-# Ejecutar tests unitarios (4 tests)
+# Ejecutar tests unitarios (4 tests) + JaCoCo report
 ./mvnw clean test     # Tests run: 4, Failures: 0, Errors: 0
 
-# Iniciar la aplicacion
+# Iniciar la aplicación
 ./mvnw spring-boot:run
 
 # Abrir en el navegador:
-# http://localhost:8080/swagger-ui.html
+# Swagger UI:        http://localhost:8080/swagger-ui.html
+# Especificación OAS: http://localhost:8080/v3/api-docs
+# Actuator Health:    http://localhost:8080/actuator/health
+# Actuator Info:      http://localhost:8080/actuator/info
+# H2 Console:         http://localhost:8080/h2-console
+# JaCoCo Report:      target/site/jacoco/index.html
 ```
 
 ### 6.3 Checklist de entrega
 
-- [x] Proyecto compila sin errores (BUILD SUCCESS)
+- [x] Proyecto compila sin errores (BUILD SUCCESS, 71 source files)
 - [x] Tests unitarios pasan (4/4 exitosos)
-- [x] Swagger UI accesible en `http://localhost:8080/swagger-ui.html`
-- [x] 35 endpoints documentados con OpenAPI
-- [x] 7 assemblers implementados con HATEOAS
-- [x] Subrecurso categoria funcionando (GET y POST)
-- [x] Analisis y reflexion sobre resultados incluidos
-- [x] README actualizado con toda la informacion del proyecto
+- [x] Swagger UI accesible con esquema bearerAuth JWT
+- [x] 36 endpoints documentados con OpenAPI
+- [x] 7 assemblers implementados con HATEOAS + DTOs
+- [x] Paginación con PagedModel y first/prev/next/last
+- [x] DELETE retorna 200 con mensaje + enlaces
+- [x] DTOs ocultan datos sensibles (password, relaciones cíclicas)
+- [x] JWT implementado con AuthController /api/auth/login
+- [x] DataInitializer crea datos de prueba automáticamente
+- [x] GlobalExceptionHandler con ErrorResponse estructurado
+- [x] Validación Bean Validation en entidades y controladores
+- [x] SuspiciousActivityService monitorea seguridad
+- [x] Actuator health/info accesibles
+- [x] JaCoCo cobertura de tests con reporte HTML
+- [x] HikariCP connection pool configurado
+- [x] Links OAS (@Link) documentados en especificación OpenAPI
+- [x] Análisis y reflexión sobre resultados ampliados
+- [x] README actualizado con toda la información
 - [x] Estructura de carpetas organizada
-- [x] Codigo subido a GitHub
+- [x] Código listo para subir a GitHub
