@@ -12,6 +12,8 @@ Esta version incorpora **OpenAPI 3.0** para la documentacion automatica de endpo
 **DTOs** para proteger datos sensibles, **Manejo global de excepciones**, y
 **Bean Validation** para validacion de datos de entrada.
 
+Trabajo realizado por : Catalina Cabezas, Andrea Rosero, Nicolas Cavieres
+
 ---
 
 ## Tecnologias Utilizadas

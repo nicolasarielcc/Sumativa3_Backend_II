@@ -3,8 +3,8 @@
 **Asignatura:** Desarrollo Backend II  
 **Experiencia:** 3 — Semana 8  
 **Tema:** Implementación avanzada de documentación en microservicios con OpenAPI y HATEOAS  
-**Estudiante:** [Nombre del estudiante]  
-**Fecha:** 11 Julio 2026
+**Estudiantes:** Catalina Cabezas, Andrea Rosero, Nicolas Cavieres
+**Fecha:** 12 Julio 2026
 
 ---
 
@@ -156,16 +156,16 @@ public class ProductoController {
 
 #### Controladores documentados (8 en total)
 
-| Controlador | Tag | Endpoints |
-|---|---|---|
-| `ProductoController` | Productos | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}, GET/{id}/categoria, POST/{id}/categoria |
-| `CategoriaController` | Categorías | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
-| `CarritoController` | Carrito | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
-| `InventarioController` | Inventario | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
-| `UsuarioController` | Usuarios | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
-| `VentaController` | Ventas | GET (paginado), GET/{id}, POST |
-| `DetalleVentaController` | Detalle de Ventas | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id} |
-| `AuthController` | Autenticación | POST /api/auth/login (JWT) |
+| Controlador              | Tag               | Endpoints                                                                                      |
+| ------------------------ | ----------------- | ---------------------------------------------------------------------------------------------- |
+| `ProductoController`     | Productos         | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}, GET/{id}/categoria, POST/{id}/categoria |
+| `CategoriaController`    | Categorías        | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}                                          |
+| `CarritoController`      | Carrito           | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}                                          |
+| `InventarioController`   | Inventario        | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}                                          |
+| `UsuarioController`      | Usuarios          | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}                                          |
+| `VentaController`        | Ventas            | GET (paginado), GET/{id}, POST                                                                 |
+| `DetalleVentaController` | Detalle de Ventas | GET (paginado), GET/{id}, POST, PUT/{id}, DELETE/{id}                                          |
+| `AuthController`         | Autenticación     | POST /api/auth/login (JWT)                                                                     |
 
 #### Detalles de la documentación OpenAPI mejorada
 
@@ -283,16 +283,16 @@ Se configuraron las siguientes dependencias en `pom.xml`:
 
 **Explicación de cada dependencia:**
 
-| Dependencia | Propósito |
-|---|---|
-| `spring-boot-starter-hateoas` | `EntityModel`, `CollectionModel`, `PagedModel`, `RepresentationModelAssembler` |
-| `spring-boot-starter-validation` | `@Valid`, `@NotNull`, `@NotBlank`, `@Size`, `@Min`, `@Positive` |
-| `spring-boot-starter-actuator` | Health checks, info endpoints (`/actuator/health`, `/actuator/info`) |
-| `springdoc-openapi-starter-webmvc-ui:2.8.5` | Generación de especificación OAS 3.0 y Swagger UI |
-| `jjwt-api/impl/jackson:0.11.5` | Generación y validación de tokens JWT (HS256) |
-| `jsoup:1.22.2` | Sanitización de inputs para prevenir XSS |
-| `jacoco-maven-plugin:0.8.12` | Cobertura de tests con reportes HTML |
-| `h2` | Base de datos en memoria para desarrollo y testing |
+| Dependencia                                 | Propósito                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `spring-boot-starter-hateoas`               | `EntityModel`, `CollectionModel`, `PagedModel`, `RepresentationModelAssembler` |
+| `spring-boot-starter-validation`            | `@Valid`, `@NotNull`, `@NotBlank`, `@Size`, `@Min`, `@Positive`                |
+| `spring-boot-starter-actuator`              | Health checks, info endpoints (`/actuator/health`, `/actuator/info`)           |
+| `springdoc-openapi-starter-webmvc-ui:2.8.5` | Generación de especificación OAS 3.0 y Swagger UI                              |
+| `jjwt-api/impl/jackson:0.11.5`              | Generación y validación de tokens JWT (HS256)                                  |
+| `jsoup:1.22.2`                              | Sanitización de inputs para prevenir XSS                                       |
+| `jacoco-maven-plugin:0.8.12`                | Cobertura de tests con reportes HTML                                           |
+| `h2`                                        | Base de datos en memoria para desarrollo y testing                             |
 
 #### 2.2.2 Bean de Configuración OpenAPI con esquema de seguridad (OpenApiConfig.java)
 
@@ -315,6 +315,7 @@ public class OpenApiConfig {
 ```
 
 **Elementos configurados:**
+
 - **name**: "bearerAuth" — nombre del esquema de seguridad
 - **type**: HTTP — tipo de autenticación
 - **scheme**: bearer — esquema HTTP Bearer
@@ -369,6 +370,7 @@ public class SecurityConfig {
 ```
 
 **Cambios clave respecto a la versión anterior:**
+
 - **Form Login reemplazado por JWT Stateless**: `SessionCreationPolicy.STATELESS`
 - **Filtro JWT**: `JwtAuthenticationFilter` se ejecuta antes de `UsernamePasswordAuthenticationFilter`
 - **Endpoint de login público**: `POST /api/auth/login` no requiere autenticación previa
@@ -378,14 +380,14 @@ public class SecurityConfig {
 
 #### 2.2.4 Archivos de Seguridad JWT implementados
 
-| Archivo | Propósito |
-|---|---|
-| `security/config/JwtProperties.java` | `@ConfigurationProperties(prefix = "jwt")` — secret y expiration |
-| `security/util/JwtUtil.java` | Generación y validación de tokens JWT HS256 |
+| Archivo                                        | Propósito                                                                                      |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `security/config/JwtProperties.java`           | `@ConfigurationProperties(prefix = "jwt")` — secret y expiration                               |
+| `security/util/JwtUtil.java`                   | Generación y validación de tokens JWT HS256                                                    |
 | `security/filter/JwtAuthenticationFilter.java` | `OncePerRequestFilter` que extrae y valida el token del header `Authorization: Bearer <token>` |
-| `security/controller/AuthController.java` | `POST /api/auth/login` — autentica con `AuthenticationManager` y retorna `JwtResponse` |
-| `security/model/LoginRequest.java` | DTO con `username` y `password` |
-| `security/model/JwtResponse.java` | DTO con `token` JWT |
+| `security/controller/AuthController.java`      | `POST /api/auth/login` — autentica con `AuthenticationManager` y retorna `JwtResponse`         |
+| `security/model/LoginRequest.java`             | DTO con `username` y `password`                                                                |
+| `security/model/JwtResponse.java`              | DTO con `token` JWT                                                                            |
 
 #### 2.2.5 Configuración de propiedades (application.properties)
 
@@ -620,17 +622,17 @@ public ResponseEntity<EntityModel<Map<String, String>>> eliminarProducto(
 
 #### 3.2.5 Estructura de enlaces por recurso (actualizada)
 
-| Recurso | Tipo retorno | Enlaces incluidos |
-|---|---|---|
-| Producto | `EntityModel<ProductoResponseDTO>` | self, listar, crear, editar, eliminar, categoria, asignar-categoria |
-| Lista Productos | `PagedModel<EntityModel<ProductoResponseDTO>>` | self, first, last, prev, next |
-| Categoría | `EntityModel<CategoriaResponseDTO>` | self, listar, crear, editar, eliminar |
-| Carrito | `EntityModel<CarritoResponseDTO>` | self, listar, crear, editar, eliminar, usuario, producto |
-| Inventario | `EntityModel<InventarioResponseDTO>` | self, listar, crear, editar, eliminar, producto |
-| Usuario (sin password) | `EntityModel<UsuarioResponseDTO>` | self, listar, crear, editar, eliminar |
-| Venta | `EntityModel<VentaResponseDTO>` | self, listar, crear, usuario |
-| DetalleVenta | `EntityModel<DetalleVentaResponseDTO>` | self, listar, crear, editar, eliminar, venta, producto |
-| DELETE respuesta | `EntityModel<Map<String,String>>` | allProductos/allCategorias/etc, addProducto/addCategoria/etc |
+| Recurso                | Tipo retorno                                   | Enlaces incluidos                                                   |
+| ---------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
+| Producto               | `EntityModel<ProductoResponseDTO>`             | self, listar, crear, editar, eliminar, categoria, asignar-categoria |
+| Lista Productos        | `PagedModel<EntityModel<ProductoResponseDTO>>` | self, first, last, prev, next                                       |
+| Categoría              | `EntityModel<CategoriaResponseDTO>`            | self, listar, crear, editar, eliminar                               |
+| Carrito                | `EntityModel<CarritoResponseDTO>`              | self, listar, crear, editar, eliminar, usuario, producto            |
+| Inventario             | `EntityModel<InventarioResponseDTO>`           | self, listar, crear, editar, eliminar, producto                     |
+| Usuario (sin password) | `EntityModel<UsuarioResponseDTO>`              | self, listar, crear, editar, eliminar                               |
+| Venta                  | `EntityModel<VentaResponseDTO>`                | self, listar, crear, usuario                                        |
+| DetalleVenta           | `EntityModel<DetalleVentaResponseDTO>`         | self, listar, crear, editar, eliminar, venta, producto              |
+| DELETE respuesta       | `EntityModel<Map<String,String>>`              | allProductos/allCategorias/etc, addProducto/addCategoria/etc        |
 
 ### 3.3 Ejemplos de respuestas JSON
 
@@ -769,16 +771,16 @@ Al cargar Swagger UI, se observan:
 
 #### 4.2.4 Códigos HTTP verificados (actualizados)
 
-| Método HTTP | Código esperado | Contexto |
-|---|---|---|
-| GET | 200 OK | Recurso encontrado |
-| POST | 201 Created | Recurso creado exitosamente |
-| PUT | 200 OK | Recurso actualizado exitosamente |
-| DELETE | 200 OK | Recurso eliminado (con mensaje + links) |
-| POST/PUT | 400 Bad Request | Datos de entrada inválidos (validación) |
-| GET/PUT/DELETE | 404 Not Found | Recurso no encontrado |
-| POST /api/auth/login | 200 OK | Token JWT retornado |
-| Acceso sin token | 401/403 | Endpoint protegido rechaza petición |
+| Método HTTP          | Código esperado | Contexto                                |
+| -------------------- | --------------- | --------------------------------------- |
+| GET                  | 200 OK          | Recurso encontrado                      |
+| POST                 | 201 Created     | Recurso creado exitosamente             |
+| PUT                  | 200 OK          | Recurso actualizado exitosamente        |
+| DELETE               | 200 OK          | Recurso eliminado (con mensaje + links) |
+| POST/PUT             | 400 Bad Request | Datos de entrada inválidos (validación) |
+| GET/PUT/DELETE       | 404 Not Found   | Recurso no encontrado                   |
+| POST /api/auth/login | 200 OK          | Token JWT retornado                     |
+| Acceso sin token     | 401/403         | Endpoint protegido rechaza petición     |
 
 #### 4.2.5 Pruebas realizadas desde Swagger UI
 
@@ -786,7 +788,7 @@ Al cargar Swagger UI, se observan:
 2. **GET /api/productos (paginado)** — Lista paginada con first/prev/next/last (200 OK)
 3. **GET /api/productos?page=0&size=5&sortBy=precio&sortDir=desc** — Ordenamiento (200 OK)
 4. **POST /api/productos** — Crear producto con validación (201 Created)
-5. **GET /api/productos/{id}** — Obtener producto con _links OAS visibles (200 OK)
+5. **GET /api/productos/{id}** — Obtener producto con \_links OAS visibles (200 OK)
 6. **PUT /api/productos/{id}** — Actualizar producto con @Valid (200 OK)
 7. **DELETE /api/productos/{id}** — Eliminar con respuesta estructurada (200 OK)
 8. **GET /api/productos/{id}** — Producto eliminado (404 Not Found con ErrorResponse)
@@ -912,21 +914,22 @@ public class ProductoController {
 
 **Diferencias clave:**
 
-| Aspecto | Antes | Después |
-|---|---|---|
-| Tipo retorno GET lista | `List<Producto>` | `PagedModel<EntityModel<ProductoResponseDTO>>` |
-| Tipo retorno GET individual | `Producto` (entidad cruda) | `EntityModel<ProductoResponseDTO>` (DTO) |
-| DELETE respuesta | `204 No Content` | `200 + EntityModel<Map>` con mensaje y links |
-| Paginación | No | `page`, `size`, `sortBy`, `sortDir` |
-| Validación de entrada | No | `@Valid`, `@Positive` |
-| Seguridad | Form Login | JWT stateless con `@SecurityRequirement("bearerAuth")` |
-| Manejo de errores | `return null` manual | `GlobalExceptionHandler` + `ResourceNotFoundException` |
-| Documentación | Ninguna | `@Tag`, `@Operation`, `@ApiResponses`, `@Link` |
-| Passwords expuestos | Sí | No (DTO oculta `password`) |
+| Aspecto                     | Antes                      | Después                                                |
+| --------------------------- | -------------------------- | ------------------------------------------------------ |
+| Tipo retorno GET lista      | `List<Producto>`           | `PagedModel<EntityModel<ProductoResponseDTO>>`         |
+| Tipo retorno GET individual | `Producto` (entidad cruda) | `EntityModel<ProductoResponseDTO>` (DTO)               |
+| DELETE respuesta            | `204 No Content`           | `200 + EntityModel<Map>` con mensaje y links           |
+| Paginación                  | No                         | `page`, `size`, `sortBy`, `sortDir`                    |
+| Validación de entrada       | No                         | `@Valid`, `@Positive`                                  |
+| Seguridad                   | Form Login                 | JWT stateless con `@SecurityRequirement("bearerAuth")` |
+| Manejo de errores           | `return null` manual       | `GlobalExceptionHandler` + `ResourceNotFoundException` |
+| Documentación               | Ninguna                    | `@Tag`, `@Operation`, `@ApiResponses`, `@Link`         |
+| Passwords expuestos         | Sí                         | No (DTO oculta `password`)                             |
 
 #### 5.2.2 Comparación de respuestas JSON
 
 **Antes — GET /api/productos:**
+
 ```json
 [
   {
@@ -940,6 +943,7 @@ public class ProductoController {
 ```
 
 **Después — GET /api/productos (paginado, DTO, HATEOAS):**
+
 ```json
 {
   "_embedded": {
@@ -953,12 +957,18 @@ public class ProductoController {
         "categoriaNombre": "Bebidas",
         "_links": {
           "self": { "href": "http://localhost:8080/api/productos/1" },
-          "listar": { "href": "http://localhost:8080/api/productos?page=0&size=10&..." },
+          "listar": {
+            "href": "http://localhost:8080/api/productos?page=0&size=10&..."
+          },
           "crear": { "href": "http://localhost:8080/api/productos" },
           "editar": { "href": "http://localhost:8080/api/productos/1" },
           "eliminar": { "href": "http://localhost:8080/api/productos/1" },
-          "categoria": { "href": "http://localhost:8080/api/productos/1/categoria" },
-          "asignar-categoria": { "href": "http://localhost:8080/api/productos/1/categoria" }
+          "categoria": {
+            "href": "http://localhost:8080/api/productos/1/categoria"
+          },
+          "asignar-categoria": {
+            "href": "http://localhost:8080/api/productos/1/categoria"
+          }
         }
       }
     ]
@@ -983,6 +993,7 @@ public class ProductoController {
 #### 5.3.1 Impacto en la seguridad
 
 La migración de Form Login a JWT stateless representa un avance significativo:
+
 - **Tokens sin estado**: El servidor no mantiene sesiones, cada request se autentica independientemente
 - **DTOs ocultan datos**: `UsuarioResponseDTO` no expone `password` ni datos internos de la entidad
 - **Monitoreo**: `SuspiciousActivityService` registra intentos fallidos de login, JWT inválidos y tasa de requests
@@ -1113,33 +1124,34 @@ minimarket/
 
 #### 6.2.2 Nuevos archivos creados (31)
 
-| Categoría | Archivos |
-|---|---|
-| DTOs | `ProductoResponseDTO.java`, `CategoriaResponseDTO.java`, `UsuarioResponseDTO.java`, `CarritoResponseDTO.java`, `InventarioResponseDTO.java`, `VentaResponseDTO.java`, `DetalleVentaResponseDTO.java` |
-| Excepciones | `ErrorResponse.java`, `GlobalExceptionHandler.java`, `ResourceNotFoundException.java` |
-| Seguridad JWT | `JwtProperties.java`, `JwtUtil.java`, `JwtAuthenticationFilter.java`, `AuthController.java`, `JwtResponse.java`, `LoginRequest.java` |
-| Monitoreo | `SuspiciousActivityService.java` |
-| Configuración | `DataInitializer.java` |
-| Total | **31 nuevos archivos + 40 modificados = 71 source files** |
+| Categoría     | Archivos                                                                                                                                                                                             |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DTOs          | `ProductoResponseDTO.java`, `CategoriaResponseDTO.java`, `UsuarioResponseDTO.java`, `CarritoResponseDTO.java`, `InventarioResponseDTO.java`, `VentaResponseDTO.java`, `DetalleVentaResponseDTO.java` |
+| Excepciones   | `ErrorResponse.java`, `GlobalExceptionHandler.java`, `ResourceNotFoundException.java`                                                                                                                |
+| Seguridad JWT | `JwtProperties.java`, `JwtUtil.java`, `JwtAuthenticationFilter.java`, `AuthController.java`, `JwtResponse.java`, `LoginRequest.java`                                                                 |
+| Monitoreo     | `SuspiciousActivityService.java`                                                                                                                                                                     |
+| Configuración | `DataInitializer.java`                                                                                                                                                                               |
+| Total         | **31 nuevos archivos + 40 modificados = 71 source files**                                                                                                                                            |
 
 #### 6.2.3 Archivos originales modificados (11 controladores/servicios + config)
 
-| Archivo | Cambio principal |
-|---|---|
-| `pom.xml` | + JWT (jjwt), Jsoup, Actuator, JaCoCo, test props |
-| `OpenApiConfig.java` | Reescrito con `@SecurityScheme("bearerAuth")` |
-| `SecurityConfig.java` | Form Login → JWT stateless + `DaoAuthenticationProvider` |
-| `application.properties` | + HikariCP, Actuator, JWT secret/expiration |
-| `7 Controllers` | + Paginación, DTOs, `@Valid`, `@Positive`, DELETE 200, `@SecurityRequirement` |
-| `7 Assemblers` | + DTOs como tipo de retorno, enlaces con params de paginación |
-| `8 Entity classes` | + `@NotBlank`, `@Size`, `@Min`, `@NotNull`, no-arg constructors |
-| `8 Service Impls` | + `Pageable` methods, `ResourceNotFoundException`, password encoding |
-| `8 Service Interfaces` | + `findAll(Pageable)` methods, `updateUsuario`, `getUsuarioByIdOrThrow` |
-| `README.md` | Reescrito completo con JWT, paginación, DTOs, nuevos endpoints |
+| Archivo                  | Cambio principal                                                              |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `pom.xml`                | + JWT (jjwt), Jsoup, Actuator, JaCoCo, test props                             |
+| `OpenApiConfig.java`     | Reescrito con `@SecurityScheme("bearerAuth")`                                 |
+| `SecurityConfig.java`    | Form Login → JWT stateless + `DaoAuthenticationProvider`                      |
+| `application.properties` | + HikariCP, Actuator, JWT secret/expiration                                   |
+| `7 Controllers`          | + Paginación, DTOs, `@Valid`, `@Positive`, DELETE 200, `@SecurityRequirement` |
+| `7 Assemblers`           | + DTOs como tipo de retorno, enlaces con params de paginación                 |
+| `8 Entity classes`       | + `@NotBlank`, `@Size`, `@Min`, `@NotNull`, no-arg constructors               |
+| `8 Service Impls`        | + `Pageable` methods, `ResourceNotFoundException`, password encoding          |
+| `8 Service Interfaces`   | + `findAll(Pageable)` methods, `updateUsuario`, `getUsuarioByIdOrThrow`       |
+| `README.md`              | Reescrito completo con JWT, paginación, DTOs, nuevos endpoints                |
 
 #### 6.2.4 README.md actualizado
 
 El README fue completamente reescrito para reflejar todas las mejoras:
+
 - Tecnologías actualizadas (JWT, Jsoup, JaCoCo, Actuator)
 - Sección de Autenticación JWT con flujo de login
 - Sección de Datos de prueba (seed automático)
